@@ -1,28 +1,32 @@
+import torch
 from transformers import AutoModelForCausalLM, AutoTokenizer, pipeline
+import os
 
-# Set the path to the directory containing the model and tokenizer
-#model_path = "./llama-2-7b-custom"
-model_path = "D:/AI_Creation/llama/new/llama-2-7b-custom"
+env = os.path.dirname(os.path.abspath(__file__))
+model_path = f"{env}/results/checkpoint-100"
 
 # Load the model and tokenizer
-model = AutoModelForCausalLM.from_pretrained(model_path)
 tokenizer = AutoTokenizer.from_pretrained(model_path)
+model = AutoModelForCausalLM.from_pretrained(model_path, torch_dtype=torch.bfloat16)
 
-# Create the prompt
-prompt = "[INST] <<SYS>>\nRespond as if you are Peter \n<</SYS>>\n\nPoof: Hey Peter, what is your opinion on Unity?. [/INST]"
+# Move the model to GPU
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+model.to(device)
+model.eval()
 
-# Count the number of tokens in the prompt
-num_prompt_tokens = len(tokenizer.encode(prompt))
+# Define a function to generate text using the fine-tuned model
+def generate_text(prompt, max_length=100):
+    input_ids = tokenizer.encode(prompt, return_tensors="pt").to(device)  # Move input tensors to GPU
+    output = model.generate(input_ids, max_length=max_length, num_return_sequences=1, no_repeat_ngram_size=2, early_stopping=True)
+    generated_text = tokenizer.decode(output[0], skip_special_tokens=True)
+    return generated_text
 
-# Calculate the maximum length for the generation
-max_length = 512
+# Test the fine-tuned model with sample prompts
+prompts = ["[INST] <<SYS>>\nRespond as if you are Peter \n<</SYS>>\n\nPoof: What is your opinion on Unity? [/INST]",
+           "[INST] <<SYS>>\nRespond as if you are Peter \n<</SYS>>\n\nPoof: I love you c: [/INST]",
+           ]
 
-# Generate a response using the model and tokenizer on the specified device
-gen = pipeline('text-generation', model=model, tokenizer=tokenizer)
-
-# Generate the text
-result = gen(prompt)
-
-# Print the generated text, removing the initial prompt
-generated_text = result[0]['generated_text']
-print(generated_text[len(prompt):])
+for prompt in prompts:
+    print(f"Prompt: {prompt}")
+    generated_text = generate_text(prompt)
+    print(f"Generated Text: {generated_text}\n")
