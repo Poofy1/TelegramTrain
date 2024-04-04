@@ -1,10 +1,10 @@
 from glob import glob
 from tqdm import tqdm
 import os, json, csv, random
+import pandas as pd
 
 env = os.path.dirname(os.path.abspath(__file__))
 data_folder = os.path.join(env, 'raw_data')
-
 json_files = glob(os.path.join(data_folder, '*.json'))
 
 
@@ -39,100 +39,192 @@ def process_text_field(message):
     return text_content.strip()
 
 
-all_messages = []
-current_sender = None
-current_messages = []
 
-for json_file in tqdm(json_files):
+def process_json_file(json_file):
     with open(json_file, 'r', encoding='utf-8') as file:
-        data = json.load(file)
-
-    for message in data['messages']:
+        json_data = json.load(file)
+    
+    # Find the two unique names in the JSON file
+    names = set()
+    for message in json_data['messages']:
+        if 'from' in message:
+            names.add(message['from'])
+        if len(names) == 2:
+            break
+    
+    if len(names) != 2:
+        print(f"Warning: Could not find exactly two unique names in {json_file}")
+        return None
+    
+    sender, receiver = names
+    
+    data = []
+    for message in json_data['messages']:
         if 'from' not in message or 'text' not in message:
             continue  # Skip if 'from' or 'text' field is missing
         
-        from_person = message.get('from')
         text_content = process_text_field(message)
         
-        # If the sender has changed, combine the previous sender's messages and reset
-        if from_person != current_sender and current_messages:
-            combined_message = '\n'.join(current_messages)
-            all_messages.append({
-                'from': current_sender,
-                'message': combined_message
-            })
-            current_messages = []
-
-        # Update the current sender and append the current message
-        current_sender = from_person
-        current_message_with_name = f"{from_person}: {text_content}"
-        current_messages.append(current_message_with_name)
-
-    # After processing all messages, add the last sender's messages if any
-    if current_messages:
-        combined_message = '\n'.join(current_messages)
-        all_messages.append({
-            'from': current_sender,
-            'message': combined_message
-        })
-        current_messages = []  # Reset for the next file
-
-
-
-
-
-formatted_conversations = []
-respondent = "Peter"
-instruction = f"Respond as if you are {respondent}"
-max_chars = 2000  # Maximum number of characters allowed for input_text
-
-# Iterate over all messages and construct the formatted conversations
-for i in range(len(all_messages)):
-    if all_messages[i]['from'] == respondent:
-        # Get the last 5 messages or less if not enough messages are available
-        start_index = max(i - 5, 0)
-        input_messages = all_messages[start_index:i]  # Slice the last 5 messages
-        input_text = '\n'.join([msg['message'] for msg in input_messages])
+        # Skip messages with empty content
+        if not text_content.strip():
+            continue
         
-        # Truncate input_text if it's longer than max_chars
-        if len(input_text) > max_chars:
-            input_text = input_text[-max_chars:]
-
-        output_text = all_messages[i]['message']
+        # Extract the date and message id from the message
+        date = message.get('date', '')
+        message_id = message.get('id', '')
         
-        formatted_conversations.append({
-            'instruction': instruction,
-            'input': input_text,
-            'output': output_text,
+        # Determine the sender and receiver for the current message
+        message_sender = message['from']
+        message_receiver = receiver if message_sender == sender else sender
+        
+        # Check if the message has a 'forwarded_from' entry
+        forwarded_from = message.get('forwarded_from', '')
+        
+        # Skip messages where the sender is the same as the 'forwarded_from' value
+        if message_sender == forwarded_from:
+            continue
+        
+        # Append the message details to the data list
+        data.append({
+            'id': message_id,
+            'date': date,
+            'sender': message_sender,
+            'receiver': message_receiver,
+            'forwarded_from': forwarded_from,
+            'message': text_content
         })
+    
+    return pd.DataFrame(data)
 
-# Define the path for the new CSV file
-formatted_csv_path = os.path.join(env, 'data/train.csv')
 
-# Shuffle the formatted conversations to ensure random distribution
-random.shuffle(formatted_conversations)
+def group_messages_into_conversations(df, forwarded_from_translations=None):
+    hour_difference = 4
+    conversations = []
+    current_conversation = []
+    prev_timestamp = None
+    prev_sender = None
 
-# Calculate the number of conversations for validation set (5% of the total)
-val_size = int(len(formatted_conversations) * 0.05)
+    if forwarded_from_translations is None:
+        forwarded_from_translations = {}
 
-# Split the data into training and validation sets
-val_conversations = formatted_conversations[:val_size]
-train_conversations = formatted_conversations[val_size:]
+    for _, row in df.iterrows():
+        timestamp = pd.to_datetime(row['date'])
+        sender = row['sender']
+        message = row['message']
+        forwarded_from = row['forwarded_from']
 
-# Define the paths for the new CSV files
-formatted_csv_val_path = os.path.join(env, 'data/val.csv')
-formatted_csv_train_path = os.path.join(env, 'data/train.csv')
+        if prev_timestamp is None or (timestamp - prev_timestamp).total_seconds() >= hour_difference * 3600:
+            if len(current_conversation) > 1 and len(set(msg.split(': ')[0] for msg in current_conversation)) > 1:
+                conversations.append(current_conversation)
+            current_conversation = []
+            prev_sender = None
 
-# Function to write conversations to a CSV file
-def write_to_csv(file_path, conversations):
-    with open(file_path, 'w', newline='', encoding='utf-8') as csvfile:
-        writer = csv.writer(csvfile)
-        writer.writerow(['instruction', 'input', 'output'])
-        for conv in conversations:
-            writer.writerow([conv['instruction'], conv['input'], conv['output']])
+        if forwarded_from:
+            forwarded_from = forwarded_from_translations.get(forwarded_from, forwarded_from)
+            message = f"(FORWARDED - {forwarded_from}) {message}"
 
-# Write the training and validation datasets to separate CSV files
-write_to_csv(formatted_csv_train_path, train_conversations)
-write_to_csv(formatted_csv_val_path, val_conversations)
+        if prev_sender == sender:
+            current_conversation[-1] += f"\n{message}"
+        else:
+            current_conversation.append(f"{sender}: {message}")
+            prev_sender = sender
 
-print('Finished Creating Train and Val CSV files')
+        prev_timestamp = timestamp
+
+    if len(current_conversation) > 1 and len(set(msg.split(': ')[0] for msg in current_conversation)) > 1:
+        conversations.append(current_conversation)
+
+    return pd.DataFrame({'conversation': conversations})
+
+
+
+
+
+
+
+def create_training_data(conversation_df, max_input_chars):
+    training_data = []
+
+    for _, row in tqdm(conversation_df.iterrows(), total=conversation_df.shape[0]):
+        conversation = row['conversation']
+        context_window = []
+        context_chars = 0
+
+        for i in range(len(conversation)):
+            message = conversation[i]
+            message_chars = len(message)
+
+            # Add message to the context window
+            context_window.append(message)
+            context_chars += message_chars
+
+            # Remove starting messages if the context window exceeds the character limit,
+            # but keep the message if it's the only one in the context window
+            while context_chars > max_input_chars and len(context_window) > 1:
+                removed_message = context_window.pop(0)
+                context_chars -= len(removed_message)
+
+            # Create training example
+            if i < len(conversation) - 1:
+                name = conversation[i+1].split(': ')[0]
+                instruction = f"Respond as if you are {name}"
+                input_text = '\n'.join(context_window)
+                output_text = conversation[i+1]
+
+                training_data.append({
+                    'instruction': instruction,
+                    'input': input_text,
+                    'output': output_text
+                })
+
+    return pd.DataFrame(training_data)
+
+
+
+
+
+
+
+
+forwarded_from_translations = {'mltn': 'Peter'}
+max_input_chars = 1024
+val_split = .05
+
+
+# Process JSON files, group messages into conversations, and create a single DataFrame
+conversation_dataframes = []
+for json_file in tqdm(json_files):
+    df = process_json_file(json_file)
+    if df is not None:
+        conversation_df = group_messages_into_conversations(df, forwarded_from_translations)
+        conversation_dataframes.append(conversation_df)
+
+
+# Merge all conversation DataFrames into a single DataFrame
+merged_conversation_df = pd.concat(conversation_dataframes, ignore_index=True)
+
+
+# Split the merged conversations into train and validation sets
+val_conversation_df = merged_conversation_df.sample(frac=val_split, random_state=42)
+train_conversation_df = merged_conversation_df.drop(val_conversation_df.index)
+
+# Create training data for the train set
+train_data_df = create_training_data(train_conversation_df, max_input_chars)
+val_data_df = create_training_data(val_conversation_df, max_input_chars)
+
+
+"""# Save the validation conversation DataFrame to a CSV file
+output_file = f'{env}/conversations_val.csv'
+val_conversation_df.to_csv(output_file, index=False, encoding='utf-8')
+print(f"Validation conversations saved to {output_file}.")"""
+
+
+# Save the train data to a CSV file
+output_file = f'{env}/data/train.csv'
+train_data_df.to_csv(output_file, index=False, encoding='utf-8')
+print(f"Train data saved to {output_file}.")
+
+# Save the validation data to a CSV file
+output_file = f'{env}/data/val.csv'
+val_data_df.to_csv(output_file, index=False, encoding='utf-8')
+print(f"Validation data saved to {output_file}.")

@@ -21,11 +21,14 @@ for parameter in model.model.layers[:27].parameters():
     parameter.requires_grad = False
 
 # Tokenize the dataset
-def tokenize_function(examples):
+def tokenize_function(examples, max_input = 1024):
     tokenized_batches = []
     for instruction, input_text, output in zip(examples["instruction"], examples["input"], examples["output"]):
-        if instruction is None or input_text is None or output is None:
-            continue  # Skip this example if any of the fields are None
+        
+        # Truncate the user content if it's too long
+        max_user_content_length = max_input - len(tokenizer.encode(instruction)) - len(tokenizer.encode(output)) - 10  # Adjust the buffer size as needed
+        if len(tokenizer.encode(input_text)) > max_user_content_length:
+            input_text = tokenizer.decode(tokenizer.encode(input_text)[-max_user_content_length:])
 
         # Prepare the messages in the format expected by the model
         messages = [
@@ -38,11 +41,10 @@ def tokenize_function(examples):
         prompt = tokenizer.apply_chat_template(messages, add_generation_prompt=False, tokenize=False)
 
         # Tokenize the structured prompt
-        tokenized_prompt = tokenizer(prompt, truncation=True, max_length=1024)
+        tokenized_prompt = tokenizer(prompt)
         tokenized_batches.append(tokenized_prompt)
 
     # Since we're assuming batch processing, we need to properly structure the tokenized output
-    # This is a simplification and might need adjustment based on actual batch size and handling
     if len(tokenized_batches) > 0:
         # Assuming all tokenized batches have the same keys, we consolidate them into batches
         consolidated_batch = {key: [dic[key] for dic in tokenized_batches] for key in tokenized_batches[0]}
@@ -61,7 +63,7 @@ data_collator = DataCollatorForLanguageModeling(
 
 # Define training arguments
 training_args = TrainingArguments(
-    output_dir=f"{env}/results",
+    output_dir=f"{env}/checkpoints",
     evaluation_strategy="epoch",
     learning_rate=1e-4,
     per_device_train_batch_size=3,
@@ -69,7 +71,7 @@ training_args = TrainingArguments(
     gradient_accumulation_steps=8,
     gradient_checkpointing=True,
     num_train_epochs=30,
-    weight_decay=0.01,
+    weight_decay=0.025,
     push_to_hub=False,
     bf16=True,
     log_level="info",

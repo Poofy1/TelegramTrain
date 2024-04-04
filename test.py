@@ -2,7 +2,7 @@ from transformers import AutoModelForCausalLM, AutoTokenizer, pipeline
 import os, re, torch
 
 env = os.path.dirname(os.path.abspath(__file__))
-model_path = f"{env}/results/checkpoint-600"
+model_path = f"{env}/results/checkpoint-1100"
 
 # Load the model and tokenizer
 tokenizer = AutoTokenizer.from_pretrained(model_path)
@@ -16,7 +16,7 @@ model.eval()
 respondent = "Peter"
 
 # Define a function to generate text using the fine-tuned model
-def generate_text(prompt, max_length=100):
+def generate_text(prompt, max_length=512):
     messages = [
         {"role": "system", "content": f"Respond as if you are {respondent}"},
         {"role": "user", "content": prompt},
@@ -24,7 +24,7 @@ def generate_text(prompt, max_length=100):
     
     formatted_prompt = tokenizer.apply_chat_template(messages, add_generation_prompt=True, tokenize=False)
     
-    inputs = tokenizer.encode_plus(formatted_prompt, return_tensors="pt", padding=True, truncation=True, max_length=1024)
+    inputs = tokenizer.encode_plus(formatted_prompt, return_tensors="pt", padding=False, truncation=True, max_length=1024)
     input_ids = inputs["input_ids"].to(device)
     attention_mask = inputs["attention_mask"].to(device)
     
@@ -61,13 +61,15 @@ prompts = [
     ("Poof: I love you c:"),
     ("Poof: Good morning"),
     ("Poof: Who is Brandon to you?"),
-    ("Poof: What personality type is Brandon?"),
     ("Poof: What's your favorite thing to do? :3"),
-    ("Poof: :3"),
+    ("Poof: im gonna make sum hotdogs, want any?"),
+    ("Poof: List out what kinks you enjoy"),
+    ("Poof: nomnomnm\nPoof: I will eat you <3"),
+    ("Poof: What's your opinion on La Crosse?"),
     ("Poof: Aww, why are you sad? ;c"),
 ]
 
 for prompt in prompts:
     print(f"\nPrompt: \n{prompt}")
     generated_text = generate_text(prompt)
-    print(f"\nGenerated Text: \n{generated_text}\n")
+    print(f"\n{respondent}'s Response: \n{generated_text}\n")
