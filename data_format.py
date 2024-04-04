@@ -1,8 +1,6 @@
-import json
 from glob import glob
 from tqdm import tqdm
-import os
-import csv, random
+import os, json, csv, random
 
 env = os.path.dirname(os.path.abspath(__file__))
 data_folder = os.path.join(env, 'raw_data')
@@ -101,13 +99,11 @@ for i in range(len(all_messages)):
             input_text = input_text[-max_chars:]
 
         output_text = all_messages[i]['message']
-        formatted_text = f"<s>[INST] <<SYS>>\n{instruction}\n<</SYS>>\n{input_text}\n[/INST]{output_text}"
-
+        
         formatted_conversations.append({
             'instruction': instruction,
             'input': input_text,
             'output': output_text,
-            'text': formatted_text
         })
 
 # Define the path for the new CSV file
@@ -130,10 +126,10 @@ formatted_csv_train_path = os.path.join(env, 'data/train.csv')
 # Function to write conversations to a CSV file
 def write_to_csv(file_path, conversations):
     with open(file_path, 'w', newline='', encoding='utf-8') as csvfile:
-        writer = csv.DictWriter(csvfile, fieldnames=['instruction', 'input', 'output', 'text'])
-        writer.writeheader()
+        writer = csv.writer(csvfile)
+        writer.writerow(['instruction', 'input', 'output'])
         for conv in conversations:
-            writer.writerow(conv)
+            writer.writerow([conv['instruction'], conv['input'], conv['output']])
 
 # Write the training and validation datasets to separate CSV files
 write_to_csv(formatted_csv_train_path, train_conversations)

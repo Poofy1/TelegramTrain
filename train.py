@@ -1,15 +1,15 @@
 import torch
 import os
+import warnings
 from transformers import AutoTokenizer, AutoModelForCausalLM, Trainer, TrainingArguments, DataCollatorForLanguageModeling
 from datasets import load_dataset
-from torch.utils.data import DataLoader
+
+# Suppress the specific warning
+warnings.filterwarnings("ignore", message="torch.utils.checkpoint: please pass in use_reentrant=True or use_reentrant=False explicitly.")
+
 
 env = os.path.dirname(os.path.abspath(__file__))
 model_cache_dir = f"{env}/models/"
-
-# Tokenize the dataset
-def tokenize_function(examples):
-    return tokenizer(examples["text"], truncation=True, max_length=512)
 
 # Load the pre-trained model and tokenizer
 model_name = "stabilityai/stable-code-instruct-3b"
@@ -17,8 +17,39 @@ tokenizer = AutoTokenizer.from_pretrained(model_name, cache_dir=model_cache_dir,
 model = AutoModelForCausalLM.from_pretrained(model_name, torch_dtype=torch.bfloat16, cache_dir=model_cache_dir, trust_remote_code=True)
 
 # Freeze some layers
-for parameter in model.model.layers[:25].parameters():
+for parameter in model.model.layers[:27].parameters():
     parameter.requires_grad = False
+
+# Tokenize the dataset
+def tokenize_function(examples):
+    tokenized_batches = []
+    for instruction, input_text, output in zip(examples["instruction"], examples["input"], examples["output"]):
+        if instruction is None or input_text is None or output is None:
+            continue  # Skip this example if any of the fields are None
+
+        # Prepare the messages in the format expected by the model
+        messages = [
+            {"role": "system", "content": instruction},
+            {"role": "user", "content": input_text},
+            {"role": "assistant", "content": output},
+        ]
+
+        # Apply the chat template to structure the prompt correctly
+        prompt = tokenizer.apply_chat_template(messages, add_generation_prompt=False, tokenize=False)
+
+        # Tokenize the structured prompt
+        tokenized_prompt = tokenizer(prompt, truncation=True, max_length=1024)
+        tokenized_batches.append(tokenized_prompt)
+
+    # Since we're assuming batch processing, we need to properly structure the tokenized output
+    # This is a simplification and might need adjustment based on actual batch size and handling
+    if len(tokenized_batches) > 0:
+        # Assuming all tokenized batches have the same keys, we consolidate them into batches
+        consolidated_batch = {key: [dic[key] for dic in tokenized_batches] for key in tokenized_batches[0]}
+    else:
+        consolidated_batch = {}
+
+    return consolidated_batch
 
 dataset = load_dataset("csv", data_files={"train": f"{env}/data/train.csv", "validation": f"{env}/data/val.csv"})
 tokenized_datasets = dataset.map(tokenize_function, batched=True, remove_columns=dataset["train"].column_names)
@@ -33,11 +64,11 @@ training_args = TrainingArguments(
     output_dir=f"{env}/results",
     evaluation_strategy="epoch",
     learning_rate=1e-4,
-    per_device_train_batch_size=4,
-    per_device_eval_batch_size=4,
+    per_device_train_batch_size=3,
+    per_device_eval_batch_size=3,
     gradient_accumulation_steps=8,
     gradient_checkpointing=True,
-    num_train_epochs=3,
+    num_train_epochs=30,
     weight_decay=0.01,
     push_to_hub=False,
     bf16=True,

@@ -1,9 +1,8 @@
-import torch
 from transformers import AutoModelForCausalLM, AutoTokenizer, pipeline
-import os
+import os, re, torch
 
 env = os.path.dirname(os.path.abspath(__file__))
-model_path = f"{env}/results/checkpoint-100"
+model_path = f"{env}/results/checkpoint-600"
 
 # Load the model and tokenizer
 tokenizer = AutoTokenizer.from_pretrained(model_path)
@@ -14,19 +13,61 @@ device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 model.to(device)
 model.eval()
 
+respondent = "Peter"
+
 # Define a function to generate text using the fine-tuned model
 def generate_text(prompt, max_length=100):
-    input_ids = tokenizer.encode(prompt, return_tensors="pt").to(device)  # Move input tensors to GPU
-    output = model.generate(input_ids, max_length=max_length, num_return_sequences=1, no_repeat_ngram_size=2, early_stopping=True)
+    messages = [
+        {"role": "system", "content": f"Respond as if you are {respondent}"},
+        {"role": "user", "content": prompt},
+    ]
+    
+    formatted_prompt = tokenizer.apply_chat_template(messages, add_generation_prompt=True, tokenize=False)
+    
+    inputs = tokenizer.encode_plus(formatted_prompt, return_tensors="pt", padding=True, truncation=True, max_length=1024)
+    input_ids = inputs["input_ids"].to(device)
+    attention_mask = inputs["attention_mask"].to(device)
+    
+    pad_token_id = tokenizer.eos_token_id
+    eos_token_id = tokenizer.encode("<|im_end|>")[0]
+    
+    output = model.generate(
+        input_ids,
+        attention_mask=attention_mask,
+        max_length=max_length,
+        num_return_sequences=1,
+        no_repeat_ngram_size=3,
+        pad_token_id=pad_token_id,
+        top_k=50,
+        top_p=0.95,
+        eos_token_id=eos_token_id,
+    )
+    
     generated_text = tokenizer.decode(output[0], skip_special_tokens=True)
-    return generated_text
+    
+    # Remove the system message and user prompt from the generated text
+    pattern = re.compile(r'<\|im_start\|>system\n.*?<\|im_end\|>\n<\|im_start\|>user\n.*?<\|im_end\|>\n<\|im_start\|>assistant\n(.*?)<\|im_end\|>', re.DOTALL)
+    match = pattern.search(generated_text)
+    if match:
+        generated_text = match.group(1).strip()
+    else:
+        generated_text = ""
+    
+    return generated_text.strip()
 
 # Test the fine-tuned model with sample prompts
-prompts = ["[INST] <<SYS>>\nRespond as if you are Peter \n<</SYS>>\n\nPoof: What is your opinion on Unity? [/INST]",
-           "[INST] <<SYS>>\nRespond as if you are Peter \n<</SYS>>\n\nPoof: I love you c: [/INST]",
-           ]
+prompts = [
+    ("Poof: What is your opinion on Unity?"),
+    ("Poof: I love you c:"),
+    ("Poof: Good morning"),
+    ("Poof: Who is Brandon to you?"),
+    ("Poof: What personality type is Brandon?"),
+    ("Poof: What's your favorite thing to do? :3"),
+    ("Poof: :3"),
+    ("Poof: Aww, why are you sad? ;c"),
+]
 
 for prompt in prompts:
-    print(f"Prompt: {prompt}")
+    print(f"\nPrompt: \n{prompt}")
     generated_text = generate_text(prompt)
-    print(f"Generated Text: {generated_text}\n")
+    print(f"\nGenerated Text: \n{generated_text}\n")
