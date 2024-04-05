@@ -58,7 +58,7 @@ def generate_text(prompt, respondent, max_length=1024):
 
 
 
-respondent = "Archon"
+respondent = "Peter"
 
 # Test the fine-tuned model with sample prompts
 prompts = [
@@ -72,8 +72,7 @@ prompts = [
     ("Poof: nomnomnm\nI will eat you <3"),
     ("Poof: What's your opinion on La Crosse?"),
     ("Poof: Aww, why are you sad? ;c"),
-    ("Poof: Im going to kill myself"),
-    ("Poof: How bad do you think my ocpd is?"),
+    ("Poof: what are you up too? :o\nPeter: I'm trying to get myself to do the bare minimum for work for today augh\nPoof: aww\nwell goog luck honeyy"),
 ]
 
 for prompt in prompts:
