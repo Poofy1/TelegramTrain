@@ -2,7 +2,8 @@ from transformers import AutoModelForCausalLM, AutoTokenizer, pipeline
 import os, re, torch
 
 env = os.path.dirname(os.path.abspath(__file__))
-model_path = f"{env}/results/checkpoint-1100"
+model_path = f"{env}/checkpoints/checkpoint-4000"
+model_path = f"{env}/final_models/Model3"
 
 # Load the model and tokenizer
 tokenizer = AutoTokenizer.from_pretrained(model_path)
@@ -13,10 +14,9 @@ device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 model.to(device)
 model.eval()
 
-respondent = "Peter"
 
 # Define a function to generate text using the fine-tuned model
-def generate_text(prompt, max_length=512):
+def generate_text(prompt, respondent, max_length=1024):
     messages = [
         {"role": "system", "content": f"Respond as if you are {respondent}"},
         {"role": "user", "content": prompt},
@@ -55,6 +55,11 @@ def generate_text(prompt, max_length=512):
     
     return generated_text.strip()
 
+
+
+
+respondent = "Archon"
+
 # Test the fine-tuned model with sample prompts
 prompts = [
     ("Poof: What is your opinion on Unity?"),
@@ -64,12 +69,14 @@ prompts = [
     ("Poof: What's your favorite thing to do? :3"),
     ("Poof: im gonna make sum hotdogs, want any?"),
     ("Poof: List out what kinks you enjoy"),
-    ("Poof: nomnomnm\nPoof: I will eat you <3"),
+    ("Poof: nomnomnm\nI will eat you <3"),
     ("Poof: What's your opinion on La Crosse?"),
     ("Poof: Aww, why are you sad? ;c"),
+    ("Poof: Im going to kill myself"),
+    ("Poof: How bad do you think my ocpd is?"),
 ]
 
 for prompt in prompts:
     print(f"\nPrompt: \n{prompt}")
-    generated_text = generate_text(prompt)
+    generated_text = generate_text(prompt, respondent)
     print(f"\n{respondent}'s Response: \n{generated_text}\n")

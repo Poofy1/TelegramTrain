@@ -3,10 +3,10 @@ import os
 import warnings
 from transformers import AutoTokenizer, AutoModelForCausalLM, Trainer, TrainingArguments, DataCollatorForLanguageModeling
 from datasets import load_dataset
+from transformers import logging as transformers_logging
 
 # Suppress the specific warning
 warnings.filterwarnings("ignore", message="torch.utils.checkpoint: please pass in use_reentrant=True or use_reentrant=False explicitly.")
-
 
 env = os.path.dirname(os.path.abspath(__file__))
 model_cache_dir = f"{env}/models/"
@@ -41,7 +41,7 @@ def tokenize_function(examples, max_input = 1024):
         prompt = tokenizer.apply_chat_template(messages, add_generation_prompt=False, tokenize=False)
 
         # Tokenize the structured prompt
-        tokenized_prompt = tokenizer(prompt)
+        tokenized_prompt = tokenizer(prompt, truncation=True, max_length=1024)
         tokenized_batches.append(tokenized_prompt)
 
     # Since we're assuming batch processing, we need to properly structure the tokenized output
@@ -66,8 +66,8 @@ training_args = TrainingArguments(
     output_dir=f"{env}/checkpoints",
     evaluation_strategy="epoch",
     learning_rate=1e-4,
-    per_device_train_batch_size=3,
-    per_device_eval_batch_size=3,
+    per_device_train_batch_size=2,
+    per_device_eval_batch_size=2,
     gradient_accumulation_steps=8,
     gradient_checkpointing=True,
     num_train_epochs=30,
