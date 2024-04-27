@@ -1,9 +1,9 @@
 import os
 import json
+from tqdm import tqdm
 from pyrogram import Client
-from pyrogram.enums import ChatType  # Import ChatType enum
-from pyrogram.raw.functions.messages import GetMessagesReactions
-
+from pyrogram.enums import ChatType
+from pyrogram.raw.functions.messages import GetMessageReactionsList
 env = os.path.dirname(os.path.abspath(__file__))
 
 # Load the API ID and API Hash from the JSON file
@@ -13,92 +13,101 @@ with open(f'{env}/api.json') as file:
     api_hash = api_credentials['api_hash']
 
 # Create a Pyrogram client
-client = Client("my_account", api_id=api_id, api_hash=api_hash)
+app = Client("my_account", api_id=api_id, api_hash=api_hash)
 
 # Function to download a chat
 def download_chat(chat_id, output_dir):
-    with client:
+    with app:
         # Get the chat
-        chat = client.get_chat(chat_id)
+        chat = app.get_chat(chat_id)
 
         # Create the output directory if it doesn't exist
         os.makedirs(output_dir, exist_ok=True)
 
         # Get the chat history
-        messages = client.get_chat_history(chat_id)
+        messages = app.get_chat_history(chat_id)
+        total_messages = app.get_chat_history_count(chat_id)
+        
 
         # Create a JSON file to store the chat data
         chat_data = []
 
         # Iterate through the messages in the chat
-        for message in messages:
-            print(message)
+        for message in tqdm(messages, total=total_messages):
+    
             message_data = {
                 "message_id": message.id,
+                "timestamp": message.date.isoformat(),
                 "sender_id": message.from_user.id if message.from_user else None,
                 "sender_username": message.from_user.username if message.from_user else None,
                 "text": message.text,
-                "timestamp": message.date.isoformat()
             }
-
-            if message.media:
-                if isinstance(message.media, types.Photo):
-                    message_data["media"] = "photo"
-                    message_data["photo"] = {
-                        "file_id": message.media.file_id,
-                        "file_unique_id": message.media.file_unique_id,
-                        "width": message.media.width,
-                        "height": message.media.height,
-                        "file_size": message.media.file_size
+            
+            if message.entities:
+                custom_emojis = []
+                for r in message.entities:
+                    entity = {
+                        "offset": r.offset,
+                        "length": r.length,
+                        "emoji_id": r.custom_emoji_id
                     }
-                elif isinstance(message.media, types.Document):
-                    message_data["media"] = "document"
-                    message_data["document"] = {
-                        "file_name": message.media.file_name,
-                        "mime_type": message.media.mime_type,
-                        "file_id": message.media.file_id,
-                        "file_unique_id": message.media.file_unique_id,
-                        "file_size": message.media.file_size
-                    }
-                else:
-                    message_data["media"] = "other"
-
+                                    
+                    custom_emojis.append(entity)
+                    
+                message_data["test_entities"] = custom_emojis
+            
             if message.sticker:
                 message_data["sticker_id"] = message.sticker.file_id
+                
+            elif message.media:
+                media_type = str(message.media).replace("MessageMediaType.", "")
+                message_data["media_type"] = media_type
+                
+                
+            if message.forward_from:
+                message_data["forwarded_from_id"] = message.forward_from.id
+                message_data["forwarded_from_user"] = message.forward_from.username
+            
+            if message.reply_to_message_id:
+                message_data["reply_to_message_id"] = message.reply_to_message_id
+                
+                
+                
+            if message.reactions:
+                reactions = []
+                reactionsList = app.invoke(GetMessageReactionsList(
+                    id = message.id,
+                    limit = 100,
+                    peer = app.resolve_peer(chat.username)
+                ))
 
-            if message.forward_from_chat:
-                message_data["forwarded_from"] = message.forward_from_chat.id
+                
+                for r in reactionsList.reactions:
+                    rebuiltReaction = { "user_id": r.peer_id.user_id }
+                    if hasattr(r.reaction, "emoticon"):
+                        rebuiltReaction["emoji"] = r.reaction.emoticon
+                    if hasattr(r.reaction, "document_id"):
+                        rebuiltReaction["emoji_id"] = r.reaction.document_id
+                        
+                    reactions.append(rebuiltReaction)
+                message_data["reactions"] = reactions
 
-            # Get the reaction emojis for the message
-            reaction_emojis = []
-            try:
-                reactions = client.invoke(
-                    GetMessagesReactions(
-                        peer=message.chat.id,
-                        id=[message.id]
-                    )
-                )
-                for reaction in reactions.reactions:
-                    reaction_emojis.append(reaction.reaction)
-            except:
-                pass
-
-            if reaction_emojis:
-                message_data["reaction_emojis"] = reaction_emojis
 
             chat_data.append(message_data)
 
         # Save the chat data as a JSON file
         json_file = os.path.join(output_dir, "chat_data.json")
-        with open(json_file, "w") as file:
-            json.dump(chat_data, file, indent=4)
+        with open(json_file, "w", encoding="utf-8") as file:
+            json_string = json.dumps(chat_data, ensure_ascii=False, indent=4)
+            file.write(json_string)
         print(f"Saved chat data: {json_file}")
+
 
 # Function to get all chat IDs
 def get_chat_ids():
-    with client:
+    with app:
         # Get all dialogs (chats and channels)
-        dialogs = client.get_dialogs()
+        dialogs = app.get_dialogs()
 
         # Extract chat IDs and titles/usernames
         chat_info = []
