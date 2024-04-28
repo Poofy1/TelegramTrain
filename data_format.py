@@ -4,19 +4,18 @@ import os, json
 import pandas as pd
 env = os.path.dirname(os.path.abspath(__file__))
 
+
 def process_json_file(json_file):
     with open(json_file, encoding='utf-8') as file:
         data = json.load(file)
     
-    members = data[0].get("members", [])
-    member_list = ",".join([str(member["user_id"]) for member in members])
-    
     messages = []
+    
     for item in data[1:]:
         sender_id = item.get("sender_id")
         text = item.get("text", "")
-        
         media_type = item.get("media_type")
+        
         if media_type and media_type not in ["STICKER", "WEB_PAGE"]:
             text = f"({media_type}) {text}" if text else f"({media_type})"
         
@@ -25,7 +24,6 @@ def process_json_file(json_file):
             text = f"(FORWARDED FROM {forwarded_from_id}) {text}"
         
         message = {
-            "instruction": f"Respond as if you are {sender_id}, (Participants: {member_list})",
             "message_id": item.get("message_id"),
             "timestamp": item.get("timestamp"),
             "sender_id": sender_id,
@@ -37,159 +35,120 @@ def process_json_file(json_file):
         if sticker_id:
             message["text"] = f"(STICKER){sticker_id}"
         
-        reactions = item.get("reactions", [])
-        reaction_list = []
-        for reaction in reactions:
-            if "emoji" in reaction:
-                reaction_list.append(f"{reaction['emoji']}:{reaction['user_id']}")
-            elif "emoji_id" in reaction:
-                reaction_list.append(f"(EMOJI_ID){reaction['emoji_id']}:{reaction['user_id']}")
-        reaction_str = ",".join(reaction_list)
-        message["reactions"] = reaction_str
-        
         messages.append(message)
+        
+        reactions = item.get("reactions", [])
+        for reaction in reactions:
+            reaction_message = {
+                "message_id": item.get("message_id"),
+                "timestamp": item.get("timestamp"),
+                "sender_id": reaction['user_id'],
+                "reply_to_message_id": str(item.get("reply_to_message_id")) if item.get("reply_to_message_id") is not None else None
+            }
+            
+            if "emoji" in reaction:
+                reaction_message["text"] = f"(REACTION){reaction['emoji']}"
+            elif "emoji_id" in reaction:
+                reaction_message["text"] = f"(REACTION)(EMOJI_ID){reaction['emoji_id']}"
+            
+            messages.append(reaction_message)
+    
+    # Sort messages by timestamp to ensure reactions come after the message they are assigned to
+    messages.sort(key=lambda x: x["timestamp"])
+    
+    # Remove rows with empty text fields
+    messages = [message for message in messages if message.get("text")] # Removes calls and 'added to group' items
+    
+    # Add 'id' column, counting up each row from oldest to newest
+    for i, message in enumerate(messages, start=1):
+        message["id"] = i
     
     df = pd.DataFrame(messages)
     return df
 
 
-def group_messages_into_conversations(df, forwarded_from_translations=None):
-    hour_difference = 4
+def group_into_conversations(df, max_input_chars):
     conversations = []
-    current_conversation = []
-    prev_timestamp = None
-    prev_sender = None
-
-    if forwarded_from_translations is None:
-        forwarded_from_translations = {}
-
-    for _, row in df.iterrows():
-        timestamp = pd.to_datetime(row['date'])
-        sender = row['sender']
-        message = row['message']
-        forwarded_from = row['forwarded_from']
-
-        if prev_timestamp is None or (timestamp - prev_timestamp).total_seconds() >= hour_difference * 3600:
-            if len(current_conversation) > 1 and len(set(msg.split(': ')[0] for msg in current_conversation)) > 1:
-                conversations.append(current_conversation)
-            current_conversation = []
-            prev_sender = None
-
-        if forwarded_from:
-            forwarded_from = forwarded_from_translations.get(forwarded_from, forwarded_from)
-            message = f"(FORWARDED - {forwarded_from}) {message}"
-
-        if prev_sender == sender:
-            current_conversation[-1] += f"\n{message}"
-        else:
-            current_conversation.append(f"{sender}: {message}")
-            prev_sender = sender
-
-        prev_timestamp = timestamp
-
-    if len(current_conversation) > 1 and len(set(msg.split(': ')[0] for msg in current_conversation)) > 1:
-        conversations.append(current_conversation)
-
-    return pd.DataFrame({'conversation': conversations})
-
-
-
-
-
-
-
-def create_training_data(conversation_df, max_input_chars):
-    training_data = []
-
-    for _, row in tqdm(conversation_df.iterrows(), total=conversation_df.shape[0]):
-        conversation = row['conversation']
-        context_window = []
-        context_chars = 0
-
-        for i in range(len(conversation)):
-            message = conversation[i]
-            message_chars = len(message)
-
-            # Add message to the context window
-            context_window.append(message)
-            context_chars += message_chars
-
-            # Remove starting messages if the context window exceeds the character limit,
-            # but keep the message if it's the only one in the context window
-            while context_chars > max_input_chars and len(context_window) > 1:
-                removed_message = context_window.pop(0)
-                context_chars -= len(removed_message)
-
-            # Create training example
-            if i < len(conversation) - 1:
-                name = conversation[i+1].split(': ')[0]
-                instruction = f"Respond as if you are {name}"
-                input_text = '\n'.join(context_window)
-                output_text = conversation[i+1]
-
-                training_data.append({
-                    'instruction': instruction,
-                    'input': input_text,
-                    'output': output_text
-                })
-
-    return pd.DataFrame(training_data)
-
-
     
-
-
+    for _, row in df.iterrows():
+        target_message = f"{row['sender_id']}:{row['text']}\n"
+        
+        # Create the instruction for the target message
+        instruction = f"Respond as if you are {row['sender_id']}"
+        
+        # Initialize the input messages as an empty string
+        input_messages = ""
+        
+        # Check if it's the first message in the DataFrame
+        if row['id'] == df['id'].min():
+            # If it's the first message, there should be no input messages
+            input_messages = ""
+        else:
+            # Iterate over previous messages in reverse order
+            prev_messages = df[df['id'] < row['id']].sort_values('id', ascending=False)
+            for _, prev_row in prev_messages.iterrows():
+                prev_message = f"{prev_row['sender_id']}:{prev_row['text']}\n"
+                
+                # Check if adding the previous message exceeds the max_input_chars limit
+                if len(input_messages) + len(prev_message) <= max_input_chars:
+                    input_messages = prev_message + input_messages
+                else:
+                    break
+            
+            # Check if the input messages is empty (i.e., no previous messages fit within the limit)
+            if not input_messages:
+                # Calculate the available characters for the truncated message
+                available_chars = max_input_chars - len(str(row['sender_id'])) - 5
+                
+                # Truncate the beginning of the target message to fit within the available characters
+                truncated_message = f"{row['sender_id']}:...{row['text'][-available_chars:]}\n"
+                input_messages = truncated_message
+        
+        # Create a new conversation entry
+        conversation = {
+            'input': input_messages.strip(),
+            'output': target_message.strip(),
+            'instruction': instruction
+        }
+        conversations.append(conversation)
+    
+    return pd.DataFrame(conversations)
 
 
 
 max_input_chars = 1024
-val_split = .05
+val_split = .10
 
 data_folder = os.path.join(env, 'downloads')
-subfolders = [f.path for f in os.scandir(data_folder) if f.is_dir()]
+json_files = glob(os.path.join(data_folder, '*.json'))
 
+train_dataframes = []
+val_dataframes = []
 
-conversation_dataframes = []
-i = 0
-for subfolder in tqdm(subfolders):
-    json_file = os.path.join(subfolder, '*.json')
-    json_files = glob(json_file)
+for json_file in tqdm(json_files):
     
-    json_file = json_files[0]  # Assuming there's only one JSON file per subfolder
     df = process_json_file(json_file)
-    i = i + 1
-    df.to_csv(f'{env}/testing{i}.csv', index=False, encoding='utf-8')
+
+    conversation_df = group_into_conversations(df, max_input_chars)
     
-    if df is not None:
-        conversation_df = group_messages_into_conversations(df)
-        conversation_dataframes.append(conversation_df)
+    #i = i + 1
+    #df.to_csv(f'{env}/testing{i}.csv', index=False, encoding='utf-8')
+    #conversation_df.to_csv(f'{env}/convo{i}.csv', index=False, encoding='utf-8')
+    
+    # Split the conversation_df into training and validation sets
+    num_rows = len(conversation_df)
+    val_size = int(num_rows * val_split)
+    train_size = num_rows - val_size
+    
+    train_df = conversation_df.iloc[:train_size]
+    val_df = conversation_df.iloc[train_size:]
+    
+    train_dataframes.append(train_df)
+    val_dataframes.append(val_df)
 
+# Combine the training and validation dataframes
+train_df = pd.concat(train_dataframes, ignore_index=True)
+val_df = pd.concat(val_dataframes, ignore_index=True)
 
-# Merge all conversation DataFrames into a single DataFrame
-merged_conversation_df = pd.concat(conversation_dataframes, ignore_index=True)
-
-
-# Split the merged conversations into train and validation sets
-val_conversation_df = merged_conversation_df.sample(frac=val_split, random_state=42)
-train_conversation_df = merged_conversation_df.drop(val_conversation_df.index)
-
-# Create training data for the train set
-train_data_df = create_training_data(train_conversation_df, max_input_chars)
-val_data_df = create_training_data(val_conversation_df, max_input_chars)
-
-
-"""# Save the validation conversation DataFrame to a CSV file
-output_file = f'{env}/conversations_val.csv'
-val_conversation_df.to_csv(output_file, index=False, encoding='utf-8')
-print(f"Validation conversations saved to {output_file}.")"""
-
-
-# Save the train data to a CSV file
-output_file = f'{env}/data/train.csv'
-train_data_df.to_csv(output_file, index=False, encoding='utf-8')
-print(f"Train data saved to {output_file}.")
-
-# Save the validation data to a CSV file
-output_file = f'{env}/data/val.csv'
-val_data_df.to_csv(output_file, index=False, encoding='utf-8')
-print(f"Validation data saved to {output_file}.")
+train_df.to_csv(f'{env}/data/train.csv', index=False, encoding='utf-8')
+val_df.to_csv(f'{env}/data/val.csv', index=False, encoding='utf-8')

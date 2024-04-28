@@ -64,9 +64,6 @@ def download_chat(chat_id, output_dir):
         # Get the chat
         chat = app.get_chat(chat_id)
 
-        # Create the output directory if it doesn't exist
-        os.makedirs(output_dir, exist_ok=True)
-
         # Get the chat history
         messages = app.get_chat_history(chat_id)
         total_messages = app.get_chat_history_count(chat_id)
@@ -145,7 +142,7 @@ def download_chat(chat_id, output_dir):
             chat_data.append(message_data)
 
         # Save the chat data as a JSON file
-        json_file = os.path.join(output_dir, "chat_data.json")
+        json_file = os.path.join(output_dir, f"{chat_id}.json")
         with open(json_file, "w", encoding="utf-8") as file:
             json_string = json.dumps(chat_data, ensure_ascii=False, indent=4)
             file.write(json_string)
@@ -194,6 +191,7 @@ selected_chat_indices = [int(index.strip()) - 1 for index in selected_chats.spli
 # Download selected chats
 for index in selected_chat_indices:
     chat_id, chat_title = chat_info[index]
-    output_dir = f"{env}/downloads/{chat_id}"
+    output_dir = f"{env}/downloads/"
+    os.makedirs(output_dir, exist_ok=True)
     print(f"Downloading chat: {chat_title}")
     download_chat(chat_id, output_dir)

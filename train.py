@@ -3,7 +3,6 @@ import os
 import warnings
 from transformers import AutoTokenizer, AutoModelForCausalLM, Trainer, TrainingArguments, DataCollatorForLanguageModeling
 from datasets import load_dataset
-from transformers import logging as transformers_logging
 
 # Suppress the specific warning
 warnings.filterwarnings("ignore", message="torch.utils.checkpoint: please pass in use_reentrant=True or use_reentrant=False explicitly.")
@@ -25,10 +24,13 @@ def tokenize_function(examples, max_input = 1024):
     tokenized_batches = []
     for instruction, input_text, output in zip(examples["instruction"], examples["input"], examples["output"]):
         
+        if input_text is None:
+            input_text = ""
+
         # Truncate the user content if it's too long
         max_user_content_length = max_input - len(tokenizer.encode(instruction)) - len(tokenizer.encode(output)) - 10  # Adjust the buffer size as needed
         if len(tokenizer.encode(input_text)) > max_user_content_length:
-            input_text = tokenizer.decode(tokenizer.encode(input_text)[-max_user_content_length:])
+           input_text = tokenizer.decode(tokenizer.encode(input_text)[-max_user_content_length:])
 
         # Prepare the messages in the format expected by the model
         messages = [
@@ -70,7 +72,7 @@ training_args = TrainingArguments(
     per_device_eval_batch_size=2,
     gradient_accumulation_steps=8,
     gradient_checkpointing=True,
-    num_train_epochs=30,
+    num_train_epochs=5,
     weight_decay=0.025,
     push_to_hub=False,
     bf16=True,
