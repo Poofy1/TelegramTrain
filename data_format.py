@@ -1,97 +1,56 @@
 from glob import glob
 from tqdm import tqdm
-import os, json, csv, random
+import os, json
 import pandas as pd
 env = os.path.dirname(os.path.abspath(__file__))
 
-
-def process_text_field(message):
-    text_content = ''
-    
-    # Include placeholder text for different media types
-    if 'media_type' in message:
-        media_type = message['media_type'].upper()
-        text_content += f"({media_type}) "
-        if 'sticker_emoji' in message:
-            text_content += f"{message['sticker_emoji']} "
-    elif 'photo' in message:
-        text_content += '(IMAGE) '
-    elif 'file' in message:
-        text_content += '(FILE) '
-
-    # Append actual text if it's available and not empty
-    if message.get('text'):
-        if isinstance(message['text'], list):
-            # Concatenate parts of text if it's a list
-            text_parts = []
-            for part in message['text']:
-                if isinstance(part, dict) and part.get('type') == 'link':
-                    text_parts.append(part['text'])  # Append the link text
-                elif isinstance(part, str):
-                    text_parts.append(part)
-            text_content += ' '.join(text_parts).replace('\n', ' ')
-        elif isinstance(message['text'], str):
-            text_content += message['text'].replace('\n', ' ')
-    
-    return text_content.strip()
-
-
-
 def process_json_file(json_file):
-    with open(json_file, 'r', encoding='utf-8') as file:
-        json_data = json.load(file)
+    with open(json_file, encoding='utf-8') as file:
+        data = json.load(file)
     
-    # Find the two unique names in the JSON file
-    names = set()
-    for message in json_data['messages']:
-        if 'from' in message:
-            names.add(message['from'])
-        if len(names) == 2:
-            break
+    members = data[0].get("members", [])
+    member_list = ",".join([str(member["user_id"]) for member in members])
     
-    if len(names) != 2:
-        print(f"Warning: Could not find exactly two unique names in {json_file}")
-        return None
+    messages = []
+    for item in data[1:]:
+        sender_id = item.get("sender_id")
+        text = item.get("text", "")
+        
+        media_type = item.get("media_type")
+        if media_type and media_type not in ["STICKER", "WEB_PAGE"]:
+            text = f"({media_type}) {text}" if text else f"({media_type})"
+        
+        forwarded_from_id = item.get("forwarded_from_id")
+        if forwarded_from_id:
+            text = f"(FORWARDED FROM {forwarded_from_id}) {text}"
+        
+        message = {
+            "instruction": f"Respond as if you are {sender_id}, (Participants: {member_list})",
+            "message_id": item.get("message_id"),
+            "timestamp": item.get("timestamp"),
+            "sender_id": sender_id,
+            "text": text,
+            "reply_to_message_id": str(item.get("reply_to_message_id")) if item.get("reply_to_message_id") is not None else None
+        }
+        
+        sticker_id = item.get("sticker_id")
+        if sticker_id:
+            message["text"] = f"(STICKER){sticker_id}"
+        
+        reactions = item.get("reactions", [])
+        reaction_list = []
+        for reaction in reactions:
+            if "emoji" in reaction:
+                reaction_list.append(f"{reaction['emoji']}:{reaction['user_id']}")
+            elif "emoji_id" in reaction:
+                reaction_list.append(f"(EMOJI_ID){reaction['emoji_id']}:{reaction['user_id']}")
+        reaction_str = ",".join(reaction_list)
+        message["reactions"] = reaction_str
+        
+        messages.append(message)
     
-    sender, receiver = names
-    
-    data = []
-    for message in json_data['messages']:
-        if 'from' not in message or 'text' not in message:
-            continue  # Skip if 'from' or 'text' field is missing
-        
-        text_content = process_text_field(message)
-        
-        # Skip messages with empty content
-        if not text_content.strip():
-            continue
-        
-        # Extract the date and message id from the message
-        date = message.get('date', '')
-        message_id = message.get('id', '')
-        
-        # Determine the sender and receiver for the current message
-        message_sender = message['from']
-        message_receiver = receiver if message_sender == sender else sender
-        
-        # Check if the message has a 'forwarded_from' entry
-        forwarded_from = message.get('forwarded_from', '')
-        
-        # Skip messages where the sender is the same as the 'forwarded_from' value
-        if message_sender == forwarded_from:
-            continue
-        
-        # Append the message details to the data list
-        data.append({
-            'id': message_id,
-            'date': date,
-            'sender': message_sender,
-            'receiver': message_receiver,
-            'forwarded_from': forwarded_from,
-            'message': text_content
-        })
-    
-    return pd.DataFrame(data)
+    df = pd.DataFrame(messages)
+    return df
 
 
 def group_messages_into_conversations(df, forwarded_from_translations=None):
@@ -177,26 +136,32 @@ def create_training_data(conversation_df, max_input_chars):
     return pd.DataFrame(training_data)
 
 
+    
 
 
 
 
 
-
-forwarded_from_translations = {'mltn': 'Peter'}
 max_input_chars = 1024
 val_split = .05
 
-data_folder = os.path.join(env, 'raw_data')
-json_files = glob(os.path.join(data_folder, '*.json'))
+data_folder = os.path.join(env, 'downloads')
+subfolders = [f.path for f in os.scandir(data_folder) if f.is_dir()]
 
-# Process JSON files, group messages into conversations, and create a single DataFrame
+
 conversation_dataframes = []
-for json_file in tqdm(json_files):
+i = 0
+for subfolder in tqdm(subfolders):
+    json_file = os.path.join(subfolder, '*.json')
+    json_files = glob(json_file)
+    
+    json_file = json_files[0]  # Assuming there's only one JSON file per subfolder
     df = process_json_file(json_file)
-    df.to_csv(f'{env}/testing.csv', index=False, encoding='utf-8')
+    i = i + 1
+    df.to_csv(f'{env}/testing{i}.csv', index=False, encoding='utf-8')
+    
     if df is not None:
-        conversation_df = group_messages_into_conversations(df, forwarded_from_translations)
+        conversation_df = group_messages_into_conversations(df)
         conversation_dataframes.append(conversation_df)
 
 

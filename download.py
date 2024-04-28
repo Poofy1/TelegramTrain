@@ -15,6 +15,49 @@ with open(f'{env}/api.json') as file:
 # Create a Pyrogram client
 app = Client("my_account", api_id=api_id, api_hash=api_hash)
 
+
+
+def get_chat_members(chat):
+    # Get the list of members based on the chat type
+    if chat.type in [ChatType.GROUP, ChatType.SUPERGROUP, ChatType.CHANNEL]:
+        members = app.get_chat_members(chat_id)
+    elif chat.type == ChatType.PRIVATE:
+        members = [chat]
+    else:
+        members = []
+            
+    # Create a list to store member information
+    member_data = []
+    for member in members:
+        if chat.type == ChatType.PRIVATE:
+            # Add the other user's information
+            member_info = {
+                "user_id": member.id,
+                "username": member.username,
+                "joined_date": None
+            }
+            member_data.append(member_info)
+            
+            # Add your own information
+            me = app.get_me()
+            my_info = {
+                "user_id": me.id,
+                "username": me.username,
+                "joined_date": None
+            }
+            member_data.append(my_info)
+        else:
+            member_info = {
+                "user_id": member.user.id,
+                "username": member.user.username,
+                "joined_date": member.joined_date.isoformat() if member.joined_date else None
+            }
+            member_data.append(member_info)
+
+    return {"members": member_data}
+
+
+
 # Function to download a chat
 def download_chat(chat_id, output_dir):
     with app:
@@ -28,13 +71,15 @@ def download_chat(chat_id, output_dir):
         messages = app.get_chat_history(chat_id)
         total_messages = app.get_chat_history_count(chat_id)
         
-
-        # Create a JSON file to store the chat data
+        
         chat_data = []
+        
+        member_data = get_chat_members(chat)
+        chat_data.append(member_data)
 
         # Iterate through the messages in the chat
         for message in tqdm(messages, total=total_messages):
-    
+            
             message_data = {
                 "message_id": message.id,
                 "timestamp": message.date.isoformat(),
@@ -51,10 +96,12 @@ def download_chat(chat_id, output_dir):
                         "length": r.length,
                         "emoji_id": r.custom_emoji_id
                     }
-                                    
-                    custom_emojis.append(entity)
                     
-                message_data["test_entities"] = custom_emojis
+                    if r.custom_emoji_id:
+                        custom_emojis.append(entity)
+                
+                if custom_emojis:
+                    message_data["text_entities"] = custom_emojis
             
             if message.sticker:
                 message_data["sticker_id"] = message.sticker.file_id
@@ -62,6 +109,8 @@ def download_chat(chat_id, output_dir):
             elif message.media:
                 media_type = str(message.media).replace("MessageMediaType.", "")
                 message_data["media_type"] = media_type
+                
+            
                 
                 
             if message.forward_from:
@@ -78,7 +127,7 @@ def download_chat(chat_id, output_dir):
                 reactionsList = app.invoke(GetMessageReactionsList(
                     id = message.id,
                     limit = 100,
-                    peer = app.resolve_peer(chat.username)
+                    peer = app.resolve_peer(chat.id)
                 ))
 
                 
@@ -128,6 +177,7 @@ def get_chat_ids():
             chat_info.append((dialog.chat.id, chat_title))
 
         return chat_info
+
 
 # Get all chat IDs
 chat_info = get_chat_ids()
