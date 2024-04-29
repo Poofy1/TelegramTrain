@@ -12,6 +12,7 @@ model_cache_dir = f"{env}/models/"
 
 # Load the pre-trained model and tokenizer
 model_name = "stabilityai/stable-code-instruct-3b"
+#model_name = "stabilityai/stablelm-2-1_6b-chat"
 tokenizer = AutoTokenizer.from_pretrained(model_name, cache_dir=model_cache_dir, trust_remote_code=True)
 model = AutoModelForCausalLM.from_pretrained(model_name, torch_dtype=torch.bfloat16, cache_dir=model_cache_dir, trust_remote_code=True)
 
@@ -70,9 +71,9 @@ training_args = TrainingArguments(
     learning_rate=1e-4,
     per_device_train_batch_size=2,
     per_device_eval_batch_size=2,
-    gradient_accumulation_steps=8,
+    gradient_accumulation_steps=7,
     gradient_checkpointing=True,
-    num_train_epochs=5,
+    num_train_epochs=2,
     weight_decay=0.025,
     push_to_hub=False,
     bf16=True,
