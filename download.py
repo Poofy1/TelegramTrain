@@ -47,11 +47,18 @@ def get_chat_members(chat):
             }
             member_data.append(my_info)
         else:
-            member_info = {
-                "user_id": member.user.id,
-                "username": member.user.username,
-                "joined_date": member.joined_date.isoformat() if member.joined_date else None
-            }
+            if member.user.username:
+                member_info = {
+                    "user_id": member.user.id,
+                    "username": member.user.username,
+                    "joined_date": member.joined_date.isoformat() if member.joined_date else None
+                }
+            else:
+                member_info = {
+                    "user_id": member.user.id,
+                    "username": member.user.first_name,
+                    "joined_date": member.joined_date.isoformat() if member.joined_date else None
+                }
             member_data.append(member_info)
 
     return {"members": member_data}
@@ -77,11 +84,18 @@ def download_chat(chat_id, output_dir):
         # Iterate through the messages in the chat
         for message in tqdm(messages, total=total_messages):
             
+            
             message_data = {
                 "message_id": message.id,
                 "timestamp": message.date.isoformat(),
                 "sender_id": message.from_user.id if message.from_user else None,
-                "sender_username": message.from_user.username if message.from_user else None,
+                "sender_username": (
+                    message.from_user.username
+                    if message.from_user and message.from_user.username
+                    else message.from_user.first_name
+                    if message.from_user and message.from_user.first_name
+                    else None
+                ),
                 "text": message.text,
             }
             

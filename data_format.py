@@ -88,16 +88,14 @@ def group_into_conversations(df, max_input_chars):
         instruction = f"Respond as if you are <{row.username}>"
         input_messages = ""
 
-        if row.id == df.iloc[0].id:
-            input_messages = ""
-        else:
-            prev_messages = df[df['id'] < row.id].sort_values('id', ascending=False)
-            for prev_row in prev_messages.itertuples(index=False):
+        if row.id != df.iloc[0].id:
+            prev_messages = (msg for msg in df[df['id'] < row.id].sort_values('id', ascending=False).itertuples(index=False))
+            prev_message = ""
+            for prev_row in prev_messages:
                 prev_message = f"<{prev_row.username}>:{prev_row.text}\n"
-                if len(input_messages) + len(prev_message) <= max_input_chars:
-                    input_messages = prev_message + input_messages
-                else:
+                if len(input_messages) + len(prev_message) > max_input_chars:
                     break
+                input_messages = prev_message + input_messages
 
             if not input_messages:
                 available_chars = max_input_chars - len(str(row.username)) - 7
@@ -168,5 +166,5 @@ combined_key_table = pd.concat(key_tables, ignore_index=True)
 # Append custom tokens to the combined key table
 custom_token_rows = [{"token": token, "identifier": ""} for token in custom_tokens]
 combined_key_table = pd.concat([combined_key_table, pd.DataFrame(custom_token_rows)], ignore_index=True)
-
+combined_key_table = combined_key_table.drop_duplicates(subset='token', keep='first')
 combined_key_table.to_csv(f'{env}/data/key_table.csv', index=False, encoding='utf-8')
