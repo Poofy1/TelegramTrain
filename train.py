@@ -1,5 +1,6 @@
 import torch
 import os
+import pandas as pd
 import warnings
 from transformers import AutoTokenizer, AutoModelForCausalLM, Trainer, TrainingArguments, DataCollatorForLanguageModeling
 from datasets import load_dataset
@@ -13,12 +14,22 @@ model_cache_dir = f"{env}/models/"
 # Load the pre-trained model and tokenizer
 model_name = "stabilityai/stable-code-instruct-3b"
 #model_name = "stabilityai/stablelm-2-1_6b-chat"
+# USE microsoft/Phi-3-mini-4k-instruct instead????
 tokenizer = AutoTokenizer.from_pretrained(model_name, cache_dir=model_cache_dir, trust_remote_code=True)
 model = AutoModelForCausalLM.from_pretrained(model_name, torch_dtype=torch.bfloat16, cache_dir=model_cache_dir, trust_remote_code=True)
 
 # Freeze some layers
 for parameter in model.model.layers[:27].parameters():
     parameter.requires_grad = False
+
+
+
+# Add the additional tokens to the tokenizer
+key_table_path = f"{env}/data/key_table.csv"
+key_table = pd.read_csv(key_table_path)
+additional_tokens = key_table["token"].tolist()
+tokenizer.add_special_tokens({"additional_special_tokens": additional_tokens})
+model.resize_token_embeddings(len(tokenizer))
 
 # Tokenize the dataset
 def tokenize_function(examples, max_input = 1024):
@@ -44,7 +55,7 @@ def tokenize_function(examples, max_input = 1024):
         prompt = tokenizer.apply_chat_template(messages, add_generation_prompt=False, tokenize=False)
 
         # Tokenize the structured prompt
-        tokenized_prompt = tokenizer(prompt, truncation=True, max_length=1024)
+        tokenized_prompt = tokenizer(prompt, truncation=True, max_length=max_input)
         tokenized_batches.append(tokenized_prompt)
 
     # Since we're assuming batch processing, we need to properly structure the tokenized output
