@@ -68,23 +68,12 @@ def get_chat_members(chat):
 # Function to download a chat
 def download_chat(chat_id, output_dir):
     with app:
-        # Get the chat
         chat = app.get_chat(chat_id)
-
-        # Get the chat history
         messages = app.get_chat_history(chat_id)
         total_messages = app.get_chat_history_count(chat_id)
-        
-        
-        chat_data = []
-        
-        member_data = get_chat_members(chat)
-        chat_data.append(member_data)
+        chat_data = [get_chat_members(chat)]
 
-        # Iterate through the messages in the chat
         for message in tqdm(messages, total=total_messages):
-            
-            
             message_data = {
                 "message_id": message.id,
                 "timestamp": message.date.isoformat(),
@@ -98,68 +87,51 @@ def download_chat(chat_id, output_dir):
                 ),
                 "text": message.text,
             }
-            
+
             if message.entities:
-                custom_emojis = []
-                for r in message.entities:
-                    entity = {
-                        "offset": r.offset,
-                        "length": r.length,
-                        "emoji_id": r.custom_emoji_id
-                    }
-                    
-                    if r.custom_emoji_id:
-                        custom_emojis.append(entity)
-                
+                custom_emojis = [
+                    {"offset": r.offset, "length": r.length, "emoji_id": r.custom_emoji_id}
+                    for r in message.entities
+                    if r.custom_emoji_id
+                ]
                 if custom_emojis:
                     message_data["text_entities"] = custom_emojis
-            
+
             if message.sticker:
                 message_data["sticker_id"] = message.sticker.file_id
-                
             elif message.media:
-                media_type = str(message.media).replace("MessageMediaType.", "")
-                message_data["media_type"] = media_type
-                
-            
-                
-                
+                message_data["media_type"] = str(message.media).replace("MessageMediaType.", "")
+
             if message.forward_from:
                 message_data["forwarded_from_id"] = message.forward_from.id
                 message_data["forwarded_from_user"] = message.forward_from.username
-            
+
             if message.reply_to_message_id:
                 message_data["reply_to_message_id"] = message.reply_to_message_id
-                
-                
-                
+
             if message.reactions:
-                reactions = []
-                reactionsList = app.invoke(GetMessageReactionsList(
-                    id = message.id,
-                    limit = 100,
-                    peer = app.resolve_peer(chat.id)
-                ))
-
-                
-                for r in reactionsList.reactions:
-                    rebuiltReaction = { "user_id": r.peer_id.user_id }
-                    if hasattr(r.reaction, "emoticon"):
-                        rebuiltReaction["emoji"] = r.reaction.emoticon
-                    if hasattr(r.reaction, "document_id"):
-                        rebuiltReaction["emoji_id"] = r.reaction.document_id
-                        
-                    reactions.append(rebuiltReaction)
+                reactions_list = app.invoke(
+                    GetMessageReactionsList(
+                        id=message.id,
+                        limit=100,
+                        peer=app.resolve_peer(chat.id)
+                    )
+                )
+                reactions = [
+                    {
+                        "user_id": r.peer_id.user_id,
+                        "emoji": r.reaction.emoticon if hasattr(r.reaction, "emoticon") else None,
+                        "emoji_id": r.reaction.document_id if hasattr(r.reaction, "document_id") else None,
+                    }
+                    for r in reactions_list.reactions
+                ]
                 message_data["reactions"] = reactions
-
 
             chat_data.append(message_data)
 
-        # Save the chat data as a JSON file
         json_file = os.path.join(output_dir, f"{chat_id}.json")
         with open(json_file, "w", encoding="utf-8") as file:
-            json_string = json.dumps(chat_data, ensure_ascii=False, indent=4)
-            file.write(json_string)
+            json.dump(chat_data, file, ensure_ascii=False, indent=4)
         print(f"Saved chat data: {json_file}")
 
 

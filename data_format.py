@@ -1,10 +1,23 @@
 from glob import glob
 from tqdm import tqdm
+from datetime import datetime, timedelta
 import os, json
 import pandas as pd
 from collections import defaultdict
 env = os.path.dirname(os.path.abspath(__file__))
 
+
+def normalize_time_gap(time_gap):
+    max_gap = timedelta(hours=24)
+    min_gap = timedelta(seconds=1)
+    
+    if time_gap >= max_gap:
+        return 1.0
+    elif time_gap <= min_gap:
+        return 0.0
+    else:
+        return (time_gap - min_gap) / (max_gap - min_gap)
+    
 
 
 def process_json_file(json_file):
@@ -15,16 +28,24 @@ def process_json_file(json_file):
     usernames = defaultdict(int)
     emoji_ids = defaultdict(int)
     sticker_ids = defaultdict(int)
+    user_id_to_username = {}
+    
+    prev_timestamp = None
     
     # Process messages from oldest to newest
     for item in reversed(data):
         sender_id = item.get("sender_id")
         username = item.get("sender_username")
-        text = item.get("text", "")
-        media_type = item.get("media_type")
+        
+        if sender_id is None:
+            continue
         
         if username:
             usernames[username] += 1
+            user_id_to_username[sender_id] = username
+        
+        text = item.get("text", "")
+        media_type = item.get("media_type")
         
         if media_type and media_type.lower() not in ["sticker", "web_page"]:
             text = f"<{media_type.lower()}> {text}" if text else f"<{media_type.lower()}>"
@@ -33,40 +54,49 @@ def process_json_file(json_file):
         if forwarded_from_user:
             text = f"<forwarded>{forwarded_from_user}:{text}</forwarded>"
         
+        timestamp = item.get("timestamp")
+        time_gap = 0.0
+        if prev_timestamp and timestamp:
+            time_gap = normalize_time_gap(datetime.fromisoformat(timestamp) - datetime.fromisoformat(prev_timestamp))
+        
+        prev_timestamp = timestamp
+        
         message = {
             "message_id": item.get("message_id"),
-            "timestamp": item.get("timestamp"),
+            "timestamp": timestamp,
             "sender_id": sender_id,
             "username": username,
-            "text": text
+            "text": f"{time_gap:.3f}<{username}>:{text}"
         }
         
         sticker_id = item.get("sticker_id")
         if sticker_id:
-            message["text"] = f"<sticker-{sticker_id}>"
+            message["text"] = f"{time_gap:.3f}<{username}>:<sticker-{sticker_id}>"
             sticker_ids[sticker_id] += 1
         
         messages.append(message)
         
         reactions = item.get("reactions", [])
         for reaction in reactions:
+            reaction_user_id = reaction['user_id']
+            reaction_username = user_id_to_username.get(reaction_user_id, "Unknown")
+            
             reaction_message = {
                 "message_id": item.get("message_id"),
-                "timestamp": item.get("timestamp"),
-                "sender_id": reaction['user_id'],
-                "username": username
+                "timestamp": timestamp,
+                "sender_id": reaction_user_id,
+                "username": reaction_username
             }
             
             if "emoji" in reaction:
-                reaction_message["text"] = f"<reaction>{reaction['emoji']}"
+                reaction_message["text"] = f"0.000<{reaction_username}>:<reaction>{reaction['emoji']}"
             elif "emoji_id" in reaction:
                 emoji_id = reaction['emoji_id']
-                reaction_message["text"] = f"<reaction-{emoji_id}>"
+                reaction_message["text"] = f"0.000<{reaction_username}>:<reaction-{emoji_id}>"
                 emoji_ids[emoji_id] += 1
             
             messages.append(reaction_message)
     
-    messages.reverse()
     messages = [message for message in messages if message.get("text")]
     
     df = pd.DataFrame(messages)
@@ -84,7 +114,7 @@ def process_json_file(json_file):
 def group_into_conversations(df, max_input_chars):
     conversations = []
     for row in df.itertuples(index=False):
-        target_message = f"<{row.username}>:{row.text}\n"
+        target_message = f"{row.text}\n"
         instruction = f"Respond as if you are <{row.username}>"
         input_messages = ""
 
@@ -92,15 +122,13 @@ def group_into_conversations(df, max_input_chars):
             prev_messages = (msg for msg in df[df['id'] < row.id].sort_values('id', ascending=False).itertuples(index=False))
             prev_message = ""
             for prev_row in prev_messages:
-                prev_message = f"<{prev_row.username}>:{prev_row.text}\n"
+                prev_message = f"{prev_row.text}\n"
                 if len(input_messages) + len(prev_message) > max_input_chars:
                     break
                 input_messages = prev_message + input_messages
 
             if not input_messages:
-                available_chars = max_input_chars - len(str(row.username)) - 7
-                truncated_message = f"<{row.username}>:...{row.text[-available_chars:]}\n"
-                input_messages = truncated_message
+                input_messages = f"{row.text[-max_input_chars:]}\n"
 
         conversation = {
             'input': input_messages.strip(),
