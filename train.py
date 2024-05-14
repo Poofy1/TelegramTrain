@@ -19,7 +19,7 @@ tokenizer = AutoTokenizer.from_pretrained(model_name, cache_dir=model_cache_dir,
 model = AutoModelForCausalLM.from_pretrained(model_name, torch_dtype=torch.bfloat16, cache_dir=model_cache_dir, trust_remote_code=True)
 
 # Freeze some layers
-for parameter in model.model.layers[:27].parameters():
+for parameter in model.model.layers[:28].parameters():
     parameter.requires_grad = False
 
 
@@ -89,8 +89,8 @@ training_args = TrainingArguments(
     push_to_hub=False,
     bf16=True,
     log_level="info",
-    logging_steps=100,
-    save_steps=100,
+    logging_steps=250,
+    save_steps=250,
     save_total_limit=3,
 )
 
