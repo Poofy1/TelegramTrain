@@ -1,23 +1,13 @@
 from glob import glob
 from tqdm import tqdm
-from datetime import datetime, timedelta
+from datetime import datetime
+from util import *
 import os, json
 import pandas as pd
 from collections import defaultdict
 env = os.path.dirname(os.path.abspath(__file__))
 
 
-def normalize_time_gap(time_gap):
-    max_gap = timedelta(hours=24)
-    min_gap = timedelta(seconds=1)
-    
-    if time_gap >= max_gap:
-        return 1.0
-    elif time_gap <= min_gap:
-        return 0.0
-    else:
-        return (time_gap - min_gap) / (max_gap - min_gap)
-    
 
 
 def process_json_file(json_file):

@@ -3,9 +3,11 @@ import os, re, torch, json
 from telegram.ext import Application, MessageHandler, filters
 from telegram import ReactionTypeCustomEmoji
 from collections import defaultdict
+from util import *
+from datetime import datetime
 
 env = os.path.dirname(os.path.abspath(__file__))
-model_path = f"{env}/checkpoints/checkpoint-5500"
+model_path = f"{env}/checkpoints/checkpoint-5250"
 #model_path = f"{env}/final_models/Model3"
 
 # Load the model and tokenizer
@@ -58,7 +60,7 @@ def generate_text(prompt, respondent, max_length=1024):
     print(generated_text)
     
     # Remove the system message, user prompt, and respondent from the generated text
-    pattern = re.compile(r'<\|im_start\|>system\n.*?<\|im_end\|>\n<\|im_start\|>user\n.*?<\|im_end\|>\n<\|im_start\|>assistant\n<[^>]*>:(.*?)<\|im_end\|>', re.DOTALL)
+    pattern = re.compile(r'<\|im_start\|>system\n.*?<\|im_end\|>\n<\|im_start\|>user\n.*?<\|im_end\|>\n<\|im_start\|>assistant\n[^:]*:(.*?)<\|im_end\|>', re.DOTALL)
     match = pattern.search(generated_text)
     if match:
         generated_text = match.group(1).strip()
@@ -68,23 +70,31 @@ def generate_text(prompt, respondent, max_length=1024):
     return generated_text.strip()
 
 
-
-
 # Define the message handler
 async def respond(update, context):
 
     user_id = f'<{update.message.from_user.username}>'
+    timestamp = update.message.date
+    time_gap = 0.0
+    # Move the prev_timestamp declaration inside the function
+    prev_timestamp = context.user_data.get('prev_timestamp')
+
+    if prev_timestamp and timestamp:
+        time_gap = normalize_time_gap(timestamp - prev_timestamp)
+
+    # Update the prev_timestamp for the current user
+    context.user_data['prev_timestamp'] = timestamp
     
     if update.message.sticker:
         # Handle sticker message
         sticker_id = update.message.sticker.file_id
-        message = f"{user_id}:<sticker-{sticker_id}>\n"
-    if update.message.photo:
-        message = f"{user_id}:<photo>\n"
+        message = f"{time_gap:.3f}{user_id}:<sticker-{sticker_id}>\n"
+    elif update.message.photo:
+        message = f"{time_gap:.3f}{user_id}:<photo>\n"
     else:
         # Handle text message
         text = update.message.text
-        message = f"{user_id}:{text}\n"
+        message = f"{time_gap:.3f}{user_id}:{text}\n"
     
     # Add the current message to the conversation history
     conversation_history[user_id].append(message)
@@ -158,7 +168,8 @@ async def respond(update, context):
                     text="Failed sticker"
                 )
                 print(f"Failed to send sticker: {str(e)}")
-    else:
+    elif generated_text.strip():
+        
         # Send the modified response
         await context.bot.send_message(
             chat_id=update.message.chat_id,
