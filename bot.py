@@ -7,7 +7,7 @@ from util import *
 from datetime import datetime
 
 env = os.path.dirname(os.path.abspath(__file__))
-model_path = f"{env}/checkpoints/checkpoint-5250"
+model_path = f"{env}/checkpoints/checkpoint-11000"
 #model_path = f"{env}/final_models/Model3"
 
 # Load the model and tokenizer
