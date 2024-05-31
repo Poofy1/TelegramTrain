@@ -3,13 +3,12 @@ from tqdm import tqdm
 from datetime import datetime
 import os, json
 import pandas as pd
+from util import *
 from collections import defaultdict
 env = os.path.dirname(os.path.abspath(__file__))
 
 
-def get_time_gap_hours(time_delta):
-    hours = time_delta.total_seconds() // 3600
-    return min(max(int(hours), 0), 24)
+
 
 
 def combine_image_messages(messages):
@@ -178,7 +177,7 @@ for json_file in tqdm(json_files):
     
     # Split the dataframe into train and validation based on the bottom 10% of the newest messages for each chat ID
     df = df.sort_values('timestamp', ascending=False)
-    val_size = int(len(df) * 0.1)
+    val_size = int(len(df) * 0.05)
     val_df = df.iloc[:val_size]
     train_df = df.iloc[val_size:]
     

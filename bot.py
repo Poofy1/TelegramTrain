@@ -4,7 +4,6 @@ from telegram.ext import Application, MessageHandler, filters
 from telegram import ReactionTypeCustomEmoji
 from collections import defaultdict
 from util import *
-from datetime import datetime
 
 env = os.path.dirname(os.path.abspath(__file__))
 model_path = f"{env}/checkpoints/checkpoint-11000"
@@ -28,14 +27,9 @@ MAX_CHAR_LIMIT = 2000
 
 # Define a function to generate text using the fine-tuned model
 def generate_text(prompt, respondent, max_length=1024):
-    system = f"Respond as if you are <{respondent}>"
+    system = f"<|im_start|>system\nRespond as if you are <{respondent}><|im_end|>\n"
     
-    messages = [
-        {"role": "system", "content": system},
-        {"role": "user", "content": prompt},
-    ]
-    
-    formatted_prompt = tokenizer.apply_chat_template(messages, add_generation_prompt=True, tokenize=False)
+    formatted_prompt = system + "<|im_start|>user\n" + prompt + "<|im_end|>\n<|im_start|>assistant\n"
     
     inputs = tokenizer.encode_plus(formatted_prompt, return_tensors="pt", padding=False, truncation=True, max_length=1024)
     input_ids = inputs["input_ids"].to(device)
@@ -59,9 +53,8 @@ def generate_text(prompt, respondent, max_length=1024):
     generated_text = tokenizer.decode(output[0], skip_special_tokens=False)
     print(generated_text)
     
-    # Remove the system message, user prompt, and respondent from the generated text
-    pattern = re.compile(r'<\|im_start\|>system\n.*?<\|im_end\|>\n<\|im_start\|>user\n.*?<\|im_end\|>\n<\|im_start\|>assistant\n[^:]*:(.*?)<\|im_end\|>', re.DOTALL)
-    match = pattern.search(generated_text)
+    # Extract the generated response from the formatted output
+    match = re.search(r'<\|im_start\|>assistant\n(.*?)<\|im_end\|>', generated_text, re.DOTALL)
     if match:
         generated_text = match.group(1).strip()
     else:
@@ -72,59 +65,41 @@ def generate_text(prompt, respondent, max_length=1024):
 
 # Define the message handler
 async def respond(update, context):
-
-    user_id = f'<{update.message.from_user.username}>'
+    user_id = update.message.from_user.id
+    username = f"<{update.message.from_user.username}>"
     timestamp = update.message.date
-    time_gap = 0.0
-    # Move the prev_timestamp declaration inside the function
+    time_gap = 0
+    
     prev_timestamp = context.user_data.get('prev_timestamp')
-
     if prev_timestamp and timestamp:
-        time_gap = normalize_time_gap(timestamp - prev_timestamp)
+        time_gap = get_time_gap_hours(timestamp - prev_timestamp)
 
-    # Update the prev_timestamp for the current user
     context.user_data['prev_timestamp'] = timestamp
     
     if update.message.sticker:
-        # Handle sticker message
         sticker_id = update.message.sticker.file_id
-        message = f"{time_gap:.3f}{user_id}:<sticker-{sticker_id}>\n"
+        message = f"<time_gap_{time_gap}>{username}:<sticker-{sticker_id}>\n"
     elif update.message.photo:
-        message = f"{time_gap:.3f}{user_id}:<photo>\n"
+        message = f"<time_gap_{time_gap}>{username}:<photo>\n"
     else:
-        # Handle text message
         text = update.message.text
-        message = f"{time_gap:.3f}{user_id}:{text}\n"
+        message = f"<time_gap_{time_gap}>{username}:{text}\n"
     
-    # Add the current message to the conversation history
     conversation_history[user_id].append(message)
     
-    # Build the prompt by concatenating the conversation history
-    prompt = ""
-    for message in reversed(conversation_history[user_id]):
-        if len(prompt) + len(message) <= MAX_CHAR_LIMIT:
-            prompt = message + prompt
-        else:
-            break
+    prompt = "".join(conversation_history[user_id][-MAX_CHAR_LIMIT:])
     
-    respondent = "mltnfox"
+    respondent = "Archonate"
     generated_text = generate_text(prompt, respondent)
     
-    # Add the generated response to the conversation history
     conversation_history[user_id].append(f"<{respondent}>:{generated_text}\n")
     
-    
-    # Check if the generated response contains a reaction
     if "<reaction-" in generated_text:
-        # Extract the sticker ID from the generated response
         sticker_match = re.search(r'<reaction-(\d+)>', generated_text)
         if sticker_match:
             sticker_id = sticker_match.group(1)
             try:
-                print(f"sending reaction with sticker ID: {sticker_id}")
-                # Create a ReactionTypeCustomEmoji instance with the sticker ID
                 reaction = ReactionTypeCustomEmoji(custom_emoji_id=sticker_id)
-                # Send the reaction with the custom emoji
                 await context.bot.set_message_reaction(
                     chat_id=update.message.chat_id,
                     message_id=update.message.message_id,
@@ -133,13 +108,10 @@ async def respond(update, context):
             except Exception as e:
                 print(f"Failed to send reaction with sticker ID: {str(e)}")
     elif "<reaction>" in generated_text:
-        # Extract the emoji from the generated response
         reaction_match = re.search(r'<reaction>(.*)', generated_text)
         if reaction_match:
             emoji = reaction_match.group(1)
             try:
-                print(f"sending reaction, {emoji}")
-                # Send the reaction with the emoji
                 await context.bot.set_message_reaction(
                     chat_id=update.message.chat_id,
                     message_id=update.message.message_id,
@@ -148,29 +120,22 @@ async def respond(update, context):
             except Exception as e:
                 print(f"Failed to send reaction with emoji: {str(e)}")
                     
-                
-    # Check if the generated response contains a sticker
     elif "<sticker-" in generated_text:
-        # Extract the sticker ID from the generated response
         sticker_match = re.search(r'<sticker-([^>]*)>', generated_text)
         if sticker_match:
             sticker_id = sticker_match.group(1)
             try:
-                # Send the sticker
                 await context.bot.send_sticker(
                     chat_id=update.message.chat_id,
                     sticker=sticker_id
                 )
             except Exception as e:
-                # If sending the sticker fails, send the "Failed sticker" message
                 await context.bot.send_message(
                     chat_id=update.message.chat_id,
                     text="Failed sticker"
                 )
                 print(f"Failed to send sticker: {str(e)}")
     elif generated_text.strip():
-        
-        # Send the modified response
         await context.bot.send_message(
             chat_id=update.message.chat_id,
             text=generated_text
