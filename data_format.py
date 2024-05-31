@@ -1,7 +1,6 @@
 from glob import glob
 from tqdm import tqdm
 from datetime import datetime
-from util import *
 import os, json
 import pandas as pd
 from collections import defaultdict
@@ -11,7 +10,6 @@ env = os.path.dirname(os.path.abspath(__file__))
 def get_time_gap_hours(time_delta):
     hours = time_delta.total_seconds() // 3600
     return min(max(int(hours), 0), 24)
-
 
 
 def combine_image_messages(messages):
@@ -76,7 +74,7 @@ def process_json_file(json_file):
         
         forwarded_from_user = item.get("forwarded_from_user")
         if forwarded_from_user:
-            text = f"<forwarded>{forwarded_from_user}:{text}</forwarded>"
+            text = f"<forwarded><{forwarded_from_user}>:{text}</forwarded>"
         
         timestamp = item.get("timestamp")
         time_gap = 0
@@ -88,12 +86,12 @@ def process_json_file(json_file):
         message = {
             "timestamp": timestamp,
             "username": f"<{username}>",
-            "text": f"<time_gap_{time_gap}><{username}>: {text}"
+            "text": f"<time_gap_{time_gap}><{username}>:{text}"
         }
         
         sticker_id = item.get("sticker_id")
         if sticker_id:
-            message["text"] = f"<time_gap_{time_gap}><{username}>: <sticker-{sticker_id}>"
+            message["text"] = f"<time_gap_{time_gap}><{username}>:<sticker-{sticker_id}>"
             sticker_ids[sticker_id] += 1
         
         messages.append(message)
@@ -112,10 +110,10 @@ def process_json_file(json_file):
             }
             
             if "emoji" in reaction:
-                reaction_message["text"] = f"<time_gap_0><{reaction_username}>: <reaction>{reaction['emoji']}"
+                reaction_message["text"] = f"<time_gap_0><{reaction_username}>:<reaction>{reaction['emoji']}"
             elif "emoji_id" in reaction:
                 emoji_id = reaction['emoji_id']
-                reaction_message["text"] = f"<time_gap_0><{reaction_username}>: <reaction-{emoji_id}>"
+                reaction_message["text"] = f"<time_gap_0><{reaction_username}>:<reaction-{emoji_id}>"
                 emoji_ids[emoji_id] += 1
             
             messages.append(reaction_message)
@@ -158,6 +156,7 @@ data_folder = os.path.join(env, 'downloads')
 json_files = glob(os.path.join(data_folder, '*.json'))
 
 train_dataframes = []
+val_dataframes = []
 key_tables = []
 chat_id = 0
 message_id = 0
@@ -170,20 +169,22 @@ for json_file in tqdm(json_files):
     df['chat_id'] = chat_id
     chat_id += 1
     
-    # Add the val column and assign 1 to the bottom 20% of the newest messages for each chat ID
-    df = df.sort_values('timestamp', ascending=False)
-    val_size = int(len(df) * 0.2)
-    df['val'] = 0
-    df.iloc[:val_size, df.columns.get_loc('val')] = 1
+    
     
     # Add the message_id column with unique numbers, oldest messages first
     df = df.sort_values('timestamp', ascending=True)
     df['message_id'] = range(message_id, message_id + len(df))
     message_id += len(df)
     
-
-    # Append the processed dataframe to the list
-    train_dataframes.append(df)
+    # Split the dataframe into train and validation based on the bottom 10% of the newest messages for each chat ID
+    df = df.sort_values('timestamp', ascending=False)
+    val_size = int(len(df) * 0.1)
+    val_df = df.iloc[:val_size]
+    train_df = df.iloc[val_size:]
+    
+    # Append the processed dataframes to the respective lists
+    train_dataframes.append(train_df)
+    val_dataframes.append(val_df)
     key_tables.append(key_table)
     
     # Create username lookup entries for the current chat ID
@@ -194,9 +195,13 @@ for json_file in tqdm(json_files):
             "sender_id": username_row["sender_id"]
         })
 
-# Combine the training dataframes
+# Combine the training and validation dataframes
 train_df = pd.concat(train_dataframes, ignore_index=True)
+val_df = pd.concat(val_dataframes, ignore_index=True)
+
+# Save the training and validation dataframes to separate CSV files
 train_df.to_csv(f'{env}/data/train.csv', index=False, encoding='utf-8')
+val_df.to_csv(f'{env}/data/val.csv', index=False, encoding='utf-8')
 
 # Create the username lookup dataframe
 username_lookup_df = pd.DataFrame(username_lookup)
