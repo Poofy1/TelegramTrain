@@ -3,7 +3,6 @@ from tqdm import tqdm
 from datetime import datetime
 import os, json
 import pandas as pd
-from util import *
 from collections import defaultdict
 env = os.path.dirname(os.path.abspath(__file__))
 
@@ -51,8 +50,6 @@ def process_json_file(json_file):
     sticker_ids = defaultdict(int)
     user_id_to_username = {}
     
-    prev_timestamp = None
-    
     # Process messages from oldest to newest
     for item in reversed(data):
         sender_id = item.get("sender_id")
@@ -75,22 +72,15 @@ def process_json_file(json_file):
         if forwarded_from_user:
             text = f"<forwarded><{forwarded_from_user}>:{text}</forwarded>"
         
-        timestamp = item.get("timestamp")
-        time_gap = 0
-        if prev_timestamp and timestamp:
-            time_gap = get_time_gap_hours(datetime.fromisoformat(timestamp) - datetime.fromisoformat(prev_timestamp))
-        
-        prev_timestamp = timestamp
-        
         message = {
-            "timestamp": timestamp,
+            "timestamp": item.get("timestamp"),
             "username": f"<{username}>",
-            "text": f"<time_gap_{time_gap}><{username}>:{text}"
+            "text": f"<{username}>:{text}"
         }
         
         sticker_id = item.get("sticker_id")
         if sticker_id:
-            message["text"] = f"<time_gap_{time_gap}><{username}>:<sticker-{sticker_id}>"
+            message["text"] = f"<{username}>:<sticker-{sticker_id}>"
             sticker_ids[sticker_id] += 1
         
         messages.append(message)
@@ -104,15 +94,15 @@ def process_json_file(json_file):
                 continue  # Skip reactions from unknown users
             
             reaction_message = {
-                "timestamp": timestamp,
+                "timestamp": item.get("timestamp"),
                 "username": f"<{reaction_username}>"
             }
             
             if "emoji" in reaction:
-                reaction_message["text"] = f"<time_gap_0><{reaction_username}>:<reaction>{reaction['emoji']}"
+                reaction_message["text"] = f"<{reaction_username}>:<reaction>{reaction['emoji']}"
             elif "emoji_id" in reaction:
                 emoji_id = reaction['emoji_id']
-                reaction_message["text"] = f"<time_gap_0><{reaction_username}>:<reaction-{emoji_id}>"
+                reaction_message["text"] = f"<{reaction_username}>:<reaction-{emoji_id}>"
                 emoji_ids[emoji_id] += 1
             
             messages.append(reaction_message)
@@ -142,6 +132,7 @@ val_split = .10
 custom_tokens = [
     "<photo>",
     "<photos>",
+    "<hour>",
     "<sticker>",
     "<reaction>",
     "<video>",

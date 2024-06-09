@@ -1,4 +1,4 @@
-import torch
+import torch, csv
 import os, random, multiprocessing
 import pandas as pd
 import warnings
@@ -12,8 +12,8 @@ env = os.path.dirname(os.path.abspath(__file__))
 model_cache_dir = f"{env}/models/"
 
 # Load the pre-trained model and tokenizer
-model_name = "stabilityai/stable-code-instruct-3b"
-#model_name = "microsoft/Phi-3-mini-4k-instruct"
+#model_name = "stabilityai/stable-code-instruct-3b"
+model_name = "microsoft/Phi-3-mini-4k-instruct"
 #model_name = "stabilityai/stablelm-2-1_6b-chat"
 tokenizer = AutoTokenizer.from_pretrained(model_name, cache_dir=model_cache_dir, trust_remote_code=True)
 model = AutoModelForCausalLM.from_pretrained(model_name, torch_dtype=torch.bfloat16, cache_dir=model_cache_dir, trust_remote_code=True)
@@ -31,6 +31,17 @@ additional_tokens = key_table["token"].tolist()
 tokenizer.add_special_tokens({"additional_special_tokens": additional_tokens})
 model.resize_token_embeddings(len(tokenizer))
 
+
+# Load the username lookup data
+username_lookup = {}
+with open(f"{env}/data/username_lookup.csv", "r") as file:
+    reader = csv.DictReader(file)
+    for row in reader:
+        chat_id = int(row["chat_id"])
+        username = row["token"]
+        if chat_id not in username_lookup:
+            username_lookup[chat_id] = []
+        username_lookup[chat_id].append(username)
 
 # Tokenize the dataset
 def tokenize_function(examples, max_input=1024):
@@ -51,24 +62,30 @@ def tokenize_function(examples, max_input=1024):
             prev_chat_id = chat_id
 
         # Randomly determine the context window size (between 1 and the number of previous messages)
-        max_context_size = min(len(prev_messages), 25) 
+        max_context_size = min(len(prev_messages), 25)
         context_size = random.randint(1, max_context_size) if max_context_size > 0 else 0
 
         # Get the closest messages as the context window
         context_window = prev_messages[-context_size:] if context_size > 0 else []
 
+        # Get the list of chat participants for the current chat ID
+        chat_participants = username_lookup.get(chat_id, [])
+        participant_list = ", ".join(chat_participants)
+        chat_participants_text = f"Chat Participants: {participant_list}\n"
+
+        # Add the chat participants text to the context window
+        context_window.insert(0, chat_participants_text)
+
         # Manual prompt formatting
-        system_prompt = f"<|im_start|>system\nRespond as if you are {examples['username'][i]}<|im_end|>\n"
-        user_text = "<|im_start|>user\n" + "\n".join(context_window) + "<|im_end|>\n"
-        assistant_response = "<|im_start|>assistant\n" + current_message + "<|im_end|>\n"
+        user_text = "<|user|>\n" + "\n".join(context_window) + "<|end|>\n"
+        assistant_response = "<|assistant|>\n" + current_message + "<|end|>\n"
 
         # Tokenize the system prompt, user text, and assistant response
-        tokenized_system_prompt = tokenizer(system_prompt, truncation=False)
-        tokenized_user_text = tokenizer(user_text, truncation=False)
-        tokenized_assistant_response = tokenizer(assistant_response, truncation=False)
+        tokenized_user_text = tokenizer(user_text, truncation=False, add_special_tokens=False)
+        tokenized_assistant_response = tokenizer(assistant_response, truncation=False, add_special_tokens=False)
 
         # Calculate the maximum length for the user text
-        max_user_length = max_input - len(tokenized_system_prompt["input_ids"]) - len(tokenized_assistant_response["input_ids"])
+        max_user_length = max_input - len(tokenized_assistant_response["input_ids"]) - 1  # Subtract 1 for the start token
 
         # Check if there is no room for user text
         if max_user_length < 0:
@@ -77,7 +94,7 @@ def tokenize_function(examples, max_input=1024):
             if len(tokenized_assistant_response["input_ids"]) > excess_tokens:
                 tokenized_assistant_response["input_ids"] = tokenized_assistant_response["input_ids"][:-excess_tokens]
                 tokenized_assistant_response["attention_mask"] = tokenized_assistant_response["attention_mask"][:-excess_tokens]
-            max_user_length = max_input - len(tokenized_system_prompt["input_ids"]) - len(tokenized_assistant_response["input_ids"])
+            max_user_length = max_input - len(tokenized_assistant_response["input_ids"]) - 1  # Subtract 1 for the start token
             print("Handled overflow")
 
         # Manually truncate the user text from the beginning
@@ -85,10 +102,10 @@ def tokenize_function(examples, max_input=1024):
             tokenized_user_text["input_ids"] = tokenized_user_text["input_ids"][-max_user_length:]
             tokenized_user_text["attention_mask"] = tokenized_user_text["attention_mask"][-max_user_length:]
 
-        # Combine the tokenized parts
+        # Combine the tokenized parts and add the start token
         tokenized_prompt = {
-            "input_ids": tokenized_system_prompt["input_ids"] + tokenized_user_text["input_ids"] + tokenized_assistant_response["input_ids"],
-            "attention_mask": tokenized_system_prompt["attention_mask"] + tokenized_user_text["attention_mask"] + tokenized_assistant_response["attention_mask"],
+            "input_ids": [tokenizer.bos_token_id] + tokenized_user_text["input_ids"] + tokenized_assistant_response["input_ids"],
+            "attention_mask": [1] + tokenized_user_text["attention_mask"] + tokenized_assistant_response["attention_mask"],
         }
         tokenized_batches.append(tokenized_prompt)
 
