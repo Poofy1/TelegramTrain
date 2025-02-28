@@ -4,11 +4,17 @@
 ## Get latest from https://github.com/github/gitignore/blob/main/VisualStudio.gitignore
 
 # User-specific files
-*
-!*.py
-!*.gitignore
-!*.gitattributes
 
 *.json
 *.csv
 *.session
+*.pt
+*.pth
+*.safetensors
+*.bin
+models/*
+
+
+__pycache__/
+*.py[cod]
+*$py.class

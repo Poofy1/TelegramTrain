@@ -1,0 +1,7 @@
+pyrogram
+tqdm
+transformers
+python-telegram-bot
+pandas
+torch==2.2.2+cu121 -f https://download.pytorch.org/whl/torch_stable.html
+datasets

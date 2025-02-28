@@ -4,20 +4,9 @@ from tqdm import tqdm
 from pyrogram import Client
 from pyrogram.enums import ChatType
 from pyrogram.raw.functions.messages import GetMessageReactionsList
-env = os.path.dirname(os.path.abspath(__file__))
-
-# Load the API ID and API Hash from the JSON file
-with open(f'{env}/api.json') as file:
-    api_credentials = json.load(file)
-    api_id = api_credentials['api_id']
-    api_hash = api_credentials['api_hash']
-
-# Create a Pyrogram client
-app = Client("my_account", api_id=api_id, api_hash=api_hash)
 
 
-
-def get_chat_members(chat):
+def get_chat_members(app, chat, chat_id):
     # Get the list of members based on the chat type
     if chat.type in [ChatType.GROUP, ChatType.SUPERGROUP, ChatType.CHANNEL]:
         members = app.get_chat_members(chat_id)
@@ -66,12 +55,12 @@ def get_chat_members(chat):
 
 
 # Function to download a chat
-def download_chat(chat_id, output_dir):
+def download_chat(app, chat_id, output_dir):
     with app:
         chat = app.get_chat(chat_id)
         messages = app.get_chat_history(chat_id)
         total_messages = app.get_chat_history_count(chat_id)
-        chat_data = [get_chat_members(chat)]
+        chat_data = [get_chat_members(app, chat, chat_id)]
 
         for message in tqdm(messages, total=total_messages):
             message_data = {
@@ -136,7 +125,7 @@ def download_chat(chat_id, output_dir):
 
 
 # Function to get all chat IDs
-def get_chat_ids():
+def get_chat_ids(app):
     with app:
         # Get all dialogs (chats and channels)
         dialogs = app.get_dialogs()
@@ -162,22 +151,36 @@ def get_chat_ids():
         return chat_info
 
 
-# Get all chat IDs
-chat_info = get_chat_ids()
 
-# Print the list of chats
-print("Available chats:")
-for index, (chat_id, chat_title) in enumerate(chat_info, start=1):
-    print(f"{index}. {chat_title} (ID: {chat_id})")
 
-# Prompt the user to select chats to download
-selected_chats = input("Enter the numbers of the chats you want to download (comma-separated): ")
-selected_chat_indices = [int(index.strip()) - 1 for index in selected_chats.split(",")]
+def main(env):
+    
+    # Load the API ID and API Hash from the JSON file
+    with open(f'{env}/api.json') as file:
+        api_credentials = json.load(file)
+        api_id = api_credentials['api_id']
+        api_hash = api_credentials['api_hash']
 
-# Download selected chats
-for index in selected_chat_indices:
-    chat_id, chat_title = chat_info[index]
-    output_dir = f"{env}/downloads/"
-    os.makedirs(output_dir, exist_ok=True)
-    print(f"Downloading chat: {chat_title}")
-    download_chat(chat_id, output_dir)
+    # Create a Pyrogram client
+    app = Client("my_account", api_id=api_id, api_hash=api_hash)
+
+
+    # Get all chat IDs
+    chat_info = get_chat_ids(app)
+
+    # Print the list of chats
+    print("Available chats:")
+    for index, (chat_id, chat_title) in enumerate(chat_info, start=1):
+        print(f"{index}. {chat_title} (ID: {chat_id})")
+
+    # Prompt the user to select chats to download
+    selected_chats = input("Enter the numbers of the chats you want to download (comma-separated): ")
+    selected_chat_indices = [int(index.strip()) - 1 for index in selected_chats.split(",")]
+
+    # Download selected chats
+    for index in selected_chat_indices:
+        chat_id, chat_title = chat_info[index]
+        output_dir = f"{env}/data/downloads/"
+        os.makedirs(output_dir, exist_ok=True)
+        print(f"Downloading chat: {chat_title}")
+        download_chat(app, chat_id, output_dir)

@@ -4,28 +4,12 @@ from telegram.ext import Application, MessageHandler, filters
 from telegram import ReactionTypeCustomEmoji
 from collections import defaultdict
 
-env = os.path.dirname(os.path.abspath(__file__))
-model_name = f"{env}/checkpoints/checkpoint-11750"
-#model_path = f"{env}/final_models/Model3"
-
-# Load the model and tokenizer
-tokenizer = AutoTokenizer.from_pretrained(model_name)
-model = AutoModelForCausalLM.from_pretrained(model_name, torch_dtype=torch.bfloat16, trust_remote_code=True)
-
-# Move the model to GPU
-device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-model.to(device)
-model.eval()
-
-
-
 # Create a dictionary to store the conversation history for each user
 conversation_history = defaultdict(list)
 MAX_CHAR_LIMIT = 2000
 
-
 # Define a function to generate text using the fine-tuned model
-def generate_text(prompt, chat_participants, max_length=4096):
+def generate_text(model, tokenizer, device, prompt, chat_participants, max_length=4096):
     
     participant_list = ", ".join(chat_participants)
     chat_participants_text = f"Chat Participants: {participant_list}\n"
@@ -65,10 +49,10 @@ def generate_text(prompt, chat_participants, max_length=4096):
 
 
 # Define the message handler
-async def respond(update, context):
+async def respond(model, tokenizer, device, update, context):
     user_id = update.message.from_user.id
     username = f"<{update.message.from_user.username}>"
-    respondent_list = ["<mltnfox>", username]
+    respondent_list = [username]
 
     if update.message.sticker:
         sticker_id = update.message.sticker.file_id
@@ -84,7 +68,7 @@ async def respond(update, context):
 
     while True:
         prompt = "".join(conversation_history[user_id][-MAX_CHAR_LIMIT:])
-        generated_text = generate_text(prompt, respondent_list)
+        generated_text = generate_text(model, tokenizer, device, prompt, respondent_list)
         if generated_text.startswith(username) or not any(generated_text.startswith(respondent) for respondent in respondent_list):
             return
         
@@ -142,13 +126,32 @@ async def respond(update, context):
         await asyncio.sleep(30)
 
 
-# Load the login JSON file
-with open(f'{env}/api.json') as file:
-    api_credentials = json.load(file)
-bot_token = api_credentials['bot_token']
+
 
 # Set up the Telegram bot
-def main():
+def main(env):
+    model_name = f"{env}/models/chatbot_checkpoints/checkpoint-8750"
+    #model_path = f"{env}/final_models/Model3"
+
+    # Load the model and tokenizer
+    tokenizer = AutoTokenizer.from_pretrained(model_name)
+    model = AutoModelForCausalLM.from_pretrained(model_name, torch_dtype=torch.bfloat16, trust_remote_code=True)
+
+    # Move the model to GPU
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    model.to(device)
+    model.eval()
+
+
+
+    
+
+
+    # Load the login JSON file
+    with open(f'{env}/api.json') as file:
+        api_credentials = json.load(file)
+    bot_token = api_credentials['bot_token']
+
     # Create the Application and pass it your bot's token
     application = Application.builder().token(bot_token).build()
 
@@ -163,7 +166,7 @@ def main():
             current_handler.cancel()
 
         # Start a new message handler
-        current_handler = asyncio.create_task(respond(update, context))
+        current_handler = asyncio.create_task(respond(model, tokenizer, device, update, context))
 
     # Register the message handler
     message_handler = MessageHandler(filters.ALL, handle_message)
