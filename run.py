@@ -10,22 +10,44 @@ def check_api_file():
     
     if not os.path.exists(api_file_path):
         print("Error: api.json file not found!")
-        print("Please create an api.json file with the following structure:")
-        print('''{
-    "api_id": "",
-    "api_hash": "",
-    "bot_token": ""
-}''')
-        print("Fill in your Telegram API credentials and run the script again.")
-        sys.exit(1)
+        print("Let's create it now:")
+        
+        api_id = input("Enter your Telegram API ID: ")
+        api_hash = input("Enter your Telegram API hash: ")
+        bot_token = input("Enter your bot token (leave empty if not using a bot): ")
+        
+        api_data = {
+            "api_id": api_id,
+            "api_hash": api_hash,
+            "bot_token": bot_token
+        }
+        
+        with open(api_file_path, 'w') as file:
+            json.dump(api_data, file, indent=4)
+        
+        print("api.json created successfully!")
+        return
     
     # Check if the file is properly filled
     with open(api_file_path, 'r') as file:
         api_data = json.load(file)
         if not api_data.get("api_id") or not api_data.get("api_hash"):
             print("Error: api.json is missing required credentials!")
-            print("Please fill in your Telegram API credentials and run the script again.")
-            sys.exit(1)
+            
+            api_id = input("Enter your Telegram API ID: ") if not api_data.get("api_id") else api_data.get("api_id")
+            api_hash = input("Enter your Telegram API hash: ") if not api_data.get("api_hash") else api_data.get("api_hash")
+            bot_token = input("Enter your bot token (leave empty if not using a bot): ") if "bot_token" not in api_data else api_data.get("bot_token")
+            
+            api_data = {
+                "api_id": api_id,
+                "api_hash": api_hash,
+                "bot_token": bot_token
+            }
+            
+            with open(api_file_path, 'w') as file:
+                json.dump(api_data, file, indent=4)
+            
+            print("api.json updated successfully!")
 
 def main():
     # Check for API file first before doing anything else
@@ -43,21 +65,19 @@ def main():
     import src.train as train
     
     if args.bot:
-        print("Running bot...")
+        print("Starting bot...")
         bot.main(env)
     elif args.train:
-        print("Training model...")
+        print("Train model")
         train.main(env)
     else:
-        print("Running download -> data_format -> train pipeline...")
-        
-        print("Step 1: Downloading data...")
+        print("Step 1: Download data")
         download.main(env)
         
-        print("Step 2: Formatting data...")
+        print("Step 2: Format data")
         data_format.main(env)
         
-        print("Step 3: Training model...")
+        print("Step 3: Train model")
         train.main(env)
         
 if __name__ == "__main__":
